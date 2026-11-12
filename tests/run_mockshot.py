@@ -19,6 +19,10 @@ try:
     # unittest 실행기를 쓰면 클래스 준비·정리가 저절로 다시 돌아 서버가 먼저 닫힌다. 메서드를 직접 부른다.
     T.E2ETest("test_2_full_flow").test_2_full_flow()
     T.E2ETest("test_3_wait_stop_resume").test_3_wait_stop_resume()
+    T.E2ETest("test_4_key_guide").test_4_key_guide()
+    # 1단계에 '열쇠 만드는 법'이 펴져 보이게 열쇠·로그인이 없는 처음 상태로 둔다(5단계 차례: 가장 긴 설명 중 하나)
+    T.E2ETest.ctl.auth.client_ok, T.E2ETest.ctl.auth.logged = False, False
+    T.E2ETest.ctl.set_guide_step(5)
     mockshot = Path.home() / ".claude" / "tools" / "mockshot.py"
     targets = [f"{T.E2ETest.srv.url}#step={n}" for n in (1, 2, 3, 4)]
     # 창 기본 크기, 창 최소 크기, 그보다 좁은 브라우저 대비책

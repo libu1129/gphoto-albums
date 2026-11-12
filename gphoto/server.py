@@ -33,6 +33,7 @@ def _routes():
     post = {
         "/api/client": lambda c, p: c.choose_client(p.get("path")),
         "/api/guide": lambda c, p: c.open_guide(p.get("page")),
+        "/api/guide_step": lambda c, p: c.set_guide_step(p.get("step")),
         "/api/login": lambda c, p: c.login(),
         "/api/login_cancel": lambda c, p: c.cancel_login(),
         "/api/logout": lambda c, p: c.logout(),

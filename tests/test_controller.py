@@ -81,6 +81,29 @@ class ControllerTest(unittest.TestCase):
         self.auth.client_info = lambda: {"ok": True, "project": "other", "client": "999", "client_id": "999-x"}
         self.assertEqual(self.ctl.albums()["items"][0]["done"], 0)
 
+    def test_choosing_key_marks_guide_until_login(self):
+        """열쇠 파일을 고르면 안내 1~7단계는 끝난 것으로 남긴다(나중에 열쇠가 깨져도 처음부터 다시 뜨지 않게)."""
+        self.ctl.set_guide_step(3)
+        self.ctl.choose_client("C:/다운로드/client_secret_1.json")
+        self.assertEqual(self.ctl.settings["guide_step"], 8)
+
+    def test_guide_step_clamped_and_kept(self):
+        """열쇠 만드는 법의 진행 단계: 1~8로 자르고, 다시 열어도(새 컨트롤러) 남고, 다른 설정을 지우지 않는다."""
+        self.ctl.set_options(include_videos=False)
+        self.assertEqual(self.ctl.set_guide_step(5), 5)
+        self.assertEqual(self.ctl.set_guide_step(99), 8)
+        self.assertEqual(self.ctl.set_guide_step("0"), 1)
+        for bad in ("다음", None, float("inf")):
+            with self.assertRaises(UserError):
+                self.ctl.set_guide_step(bad)
+        self.ctl.set_guide_step(4)
+        again = Controller(self.ctl.data, auth=self.auth, photos_base=self.fake.base)
+        try:
+            self.assertEqual(again.snapshot()["settings"]["guide_step"], 4)
+            self.assertFalse(again.settings["include_videos"])
+        finally:
+            again.shutdown()
+
 
 if __name__ == "__main__":
     unittest.main()

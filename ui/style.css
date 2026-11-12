@@ -173,10 +173,40 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent);
 .tile.bad .tile-ico { background: var(--warn-soft); border-color: var(--warn); }
 .tile-body { min-height: 42px; overflow-wrap: anywhere; font-size: 13.5px; }
 .tile-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: auto; }
-.steps { margin: 0 0 10px; padding-left: 22px; display: flex; flex-direction: column; gap: 6px; overflow: auto; min-height: 0; }
-.steps li { padding-left: 2px; }
-.steps li span { margin-right: 8px; }
-#guide { overflow: hidden; }
+/* 열쇠 만드는 법: 왼쪽 8단계 목록 + 오른쪽 설명(설명만 안에서 스크롤, 이전·마쳤어요는 아래 고정) */
+/* 안내 칸은 내용만큼만 차지하고, 창이 작을 때만 줄어들어 설명 칸이 안에서 스크롤된다 */
+.guide { padding: 12px 14px; min-height: 240px; }
+.g-top { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+.g-top > b { font-weight: 600; }
+.g-top .muted { font-size: 12.5px; }
+.g-count { font-size: 12.5px; font-weight: 600; color: var(--accent); white-space: nowrap; }
+.g-wrap { flex: 0 1 auto; min-height: 0; display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 14px; }
+.g-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; overflow: auto; min-height: 0; }
+.g-item { width: 100%; display: flex; align-items: center; gap: 9px; padding: 5px 8px; min-height: 32px; border: none; border-radius: 6px; background: transparent; text-align: left; white-space: normal; font-size: 13px; line-height: 1.3; }
+.g-item:hover:not(:disabled) { background: var(--nav-hover); }
+.g-item.view { background: var(--accent-soft); font-weight: 600; }
+.g-num { position: relative; width: 22px; height: 22px; border-radius: 50%; border: 1.5px solid var(--line-2); color: var(--muted); display: inline-flex; align-items: center; justify-content: center; font-size: 11.5px; font-weight: 600; flex: none; background: var(--card); }
+.g-item.cur .g-num { border-color: var(--accent); color: var(--accent); }
+.g-item.done .g-num { background: var(--ok); border-color: var(--ok); color: transparent; }
+.g-item.done .g-num::after { content: ""; position: absolute; left: 50%; top: 50%; width: 8px; height: 4px; border-left: 2px solid #fff; border-bottom: 2px solid #fff; transform: translate(-50%, -70%) rotate(-45deg); }
+.g-detail { display: flex; flex-direction: column; min-height: 0; min-width: 0; border-left: 1px solid var(--line); padding-left: 14px; }
+.g-scroll { flex: 0 1 auto; min-height: 0; overflow: auto; padding-right: 4px; }
+.g-actions { margin-top: auto; }
+.g-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.g-head h3 { margin: 0; flex: 1; min-width: 0; font-size: 15px; font-weight: 600; }
+.g-sub { margin: 0 0 8px; padding-left: 20px; display: flex; flex-direction: column; gap: 5px; font-size: 13.5px; }
+.g-sub small, .g-help small { color: var(--muted); font-size: 11.5px; }
+.g-ok { margin: 0 0 8px; padding: 6px 10px; font-size: 13px; background: var(--card-2); border: 1px solid var(--line); border-radius: 6px; }
+.g-ok > b:first-child { color: var(--ok); margin-right: 6px; }
+.g-warn { margin: 0 0 8px; padding: 7px 10px; font-size: 13px; background: var(--warn-soft); color: var(--warn); border-radius: 6px; font-weight: 600; }
+.g-help { margin: 0 0 8px; padding: 8px 12px 8px 28px; font-size: 13px; background: var(--card-2); border: 1px dashed var(--line-2); border-radius: 6px; display: flex; flex-direction: column; gap: 4px; }
+.g-actions { display: flex; align-items: center; gap: 8px; padding-top: 8px; margin-top: 4px; border-top: 1px solid var(--line); flex: none; }
+.g-foot { margin: 8px 0 0; font-size: 11.5px; color: var(--muted); flex: none; }
+.copy-box { display: flex; gap: 8px; align-items: flex-start; margin: 0 0 8px; }
+.copy-box pre { flex: 1; min-width: 0; margin: 0; padding: 6px 9px; font: 12px/1.5 "Cascadia Mono", Consolas, monospace; background: var(--card-2); border: 1px solid var(--line); border-radius: 6px; white-space: pre-wrap; overflow-wrap: anywhere; user-select: all; }
+button.chip-copy { display: inline-flex; align-items: center; gap: 4px; padding: 0 8px; min-height: 22px; font-size: 12.5px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); border-color: transparent; vertical-align: baseline; }
+button.chip-copy::after { content: "복사"; font-size: 11px; opacity: .75; }
+button.chip-copy:hover:not(:disabled) { background: var(--accent-soft); filter: brightness(.97); }
 
 /* ── 2. 사진 폴더 ── */
 .field-label { display: block; font-weight: 600; margin-bottom: 6px; }
@@ -309,6 +339,15 @@ td.c-chk input { margin-top: 3px; }
   .split { grid-template-columns: minmax(0, 1fr); }
   .split > .panel { height: 280px; }
   .tiles { grid-template-columns: minmax(0, 1fr); }
+  /* 열쇠 안내는 목록을 번호 줄로 접고 설명을 그 아래에 두며, 1단계 화면 전체를 스크롤한다 */
+  #page1 { height: auto; }
+  #guide, .g-wrap, .g-scroll { flex: none; }
+  .g-wrap { grid-template-columns: minmax(0, 1fr); }
+  .g-list { flex-direction: row; flex-wrap: wrap; }
+  .g-item { width: auto; padding: 4px; }
+  .g-name { display: none; }
+  .g-detail { border-left: none; padding-left: 0; border-top: 1px solid var(--line); padding-top: 10px; }
+  .g-scroll { overflow: visible; }
   .toolbar { flex-wrap: wrap; }
   .toast { left: calc(50% + 30px); max-width: calc(100% - 92px); }
 }
@@ -316,4 +355,8 @@ td.c-chk input { margin-top: 3px; }
   .head { padding-top: 16px; padding-bottom: 8px; }
   .head p { display: none; }
   .page { gap: 10px; }
+  .tile { padding: 10px 14px; gap: 6px; }
+  .tile-body { min-height: 0; }
+  .g-top { margin-bottom: 6px; }
+  .g-item { min-height: 30px; padding-top: 4px; padding-bottom: 4px; }
 }

@@ -35,12 +35,40 @@ pwsh -File install.ps1 -Scope CurrentUser     # 이 계정만: %LOCALAPPDATA%\Pr
 
 ## 처음 한 번: 구글 클라우드 열쇠 만들기
 
-1. Google Cloud 콘솔에서 프로젝트를 만들고 **Photos Library API**를 사용 설정합니다.
-2. Google 인증 플랫폼에서 앱 이름·이메일을 넣고 대상을 **외부**로 고른 뒤, **테스트 사용자**에 사진을 올릴 계정을 추가합니다.
-3. **클라이언트 → 클라이언트 만들기 → 데스크톱 앱**으로 만들고 JSON을 내려받습니다.
-4. 프로그램 1단계 **계정 연결**의 **열쇠 파일 선택**으로 그 JSON을 고르고 **구글 로그인**합니다. 권한 체크 칸은 모두 체크합니다.
+프로그램 1단계 **계정 연결**에 같은 안내가 단계별로 나옵니다. 각 단계의 **열기**를 누르면 그 콘솔 화면이 열리고, 진행은 프로그램을 다시 열어도 이어집니다.
+콘솔 화면 이름은 2026년 11월 기준입니다. 이름이 다르면 괄호 안 영어 이름이나 같은 자리의 버튼을 찾으세요.
 
-시험(테스트) 상태 앱은 7일마다 다시 로그인해야 합니다.
+![열쇠 만드는 법](docs/screens/07_key_guide.png)
+
+| 단계 | 할 일 | 맞게 됐는지 |
+|---|---|---|
+| 1. 프로젝트 만들기 | [새 프로젝트](https://console.cloud.google.com/projectcreate)에서 이름(예: 사진 올리기) → **만들기**(Create) | 왼쪽 위 프로젝트 칸에 그 이름 |
+| 2. API 켜기 | [Photos Library API](https://console.cloud.google.com/apis/library/photoslibrary.googleapis.com) → **사용**(Enable) | 버튼이 **관리**(Manage)로 바뀜 |
+| 3. 동의 화면 | [Google 인증 플랫폼](https://console.cloud.google.com/auth/branding) → **시작하기**(Get started) → 앱 이름·사용자 지원 이메일 → 대상 **외부**(External) → 연락처 이메일 → 정책 동의 → **만들기** | 왼쪽에 브랜딩·대상·클라이언트·데이터 액세스 메뉴 |
+| 4. 테스트 사용자 | [대상](https://console.cloud.google.com/auth/audience) → 테스트 사용자 **사용자 추가**(Add users) → 사진을 올릴 계정 → **저장**. 게시 상태는 **테스트** 그대로 | 목록에 그 이메일 |
+| 5. 권한 목록 | [데이터 액세스](https://console.cloud.google.com/auth/scopes) → **범위 추가 또는 삭제** → **직접 범위 추가**(Manually add scopes)에 아래 4줄 → 표에 추가 → **업데이트** → **저장** | photoslibrary 범위 두 줄 |
+| 6. 열쇠 만들기 | [클라이언트](https://console.cloud.google.com/auth/clients) → **클라이언트 만들기** → 유형 **데스크톱 앱**(Desktop app) → 만들기 → 뜨는 창에서 바로 **JSON 다운로드** | 다운로드 폴더에 `client_secret_….json` |
+| 7. 열쇠 파일 고르기 | 프로그램의 **열쇠 파일 선택** → 받은 JSON | 열쇠 파일 칸이 '등록됨' |
+| 8. 구글 로그인 | **구글 로그인** → 4단계 계정 → '확인하지 않은 앱'이면 **계속** → 권한 모두 체크 | 로그인 칸에 내 이메일 |
+
+5단계에 붙여 넣을 범위:
+
+```
+https://www.googleapis.com/auth/photoslibrary.appendonly
+https://www.googleapis.com/auth/photoslibrary.readonly.appcreateddata
+openid
+https://www.googleapis.com/auth/userinfo.email
+```
+
+> 6단계의 JSON(클라이언트 비밀번호)은 만들 때 한 번만 받을 수 있습니다(2025년 6월부터, [구글 도움말](https://support.google.com/cloud/answer/15549257)). 놓쳤으면 클라이언트를 하나 더 만드세요.
+
+막히면:
+
+- 로그인 때 '액세스 차단됨'(403 access_denied) → 4단계 테스트 사용자에 그 계정을 넣습니다.
+- 열쇠 파일을 고를 때 "'웹 애플리케이션' 유형 열쇠입니다" → 6단계를 데스크톱 앱으로 다시 만듭니다.
+- "'구글 포토에 사진 추가' 권한에 체크하지 않았습니다" → 다시 로그인하고 권한을 모두 체크합니다.
+- 7일 뒤 다시 로그인하라고 나옴 → 테스트 상태 앱은 7일마다 다시 로그인해야 합니다(구글 정책).
+
 열쇠 파일·로그인·올린 기록은 계정마다 `%LOCALAPPDATA%\GPhotoAlbums`에만 저장됩니다.
 
 ## 구조와 시험

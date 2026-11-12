@@ -111,7 +111,10 @@
   let kicked = false;        // 읽는 도중에 동작이 있었다: 끝나는 대로 바로 다시 읽는다
   let renderFailed = false;
   let scanWatch = null;      // 이 화면에서 시작한 훑기: 끝나면 3단계로 넘긴다
-  let guideOpen = false;
+  let guideOpen = null;      // 열쇠 안내를 펴 둘지(사용자가 고름). null이면 열쇠·로그인이 다 될 때까지 저절로 편다
+  let gView = 0;             // 안내에서 보고 있는 단계(1~8)
+  let gFarPrev = 0;          // 지난번 그릴 때의 차례 단계(바뀌면 그 단계를 보여 준다)
+  let gHelpOn = false;       // '막히면' 펼침
   const sticky = new Set();  // '선택한 것' 보기에서 방금 선택을 끈 행(보기를 바꿀 때까지 남긴다)
 
   async function refresh() {
@@ -213,7 +216,7 @@
         : (u.phase === 'error' || u.phase === 'stopped' || (u.phase === 'done' && u.files_failed)) ? 'warn' : '',
     };
     const subs = {
-      1: a.logged_in ? (a.email || '로그인됨') : a.problem ? '다시 로그인하세요' : !c.ok ? '열쇠 파일이 필요합니다' : '로그인하세요',
+      1: a.logged_in ? (a.email || '로그인됨') : a.problem ? '다시 로그인하세요' : !c.ok ? '열쇠 파일 필요' : '로그인하세요',
       2: S.scan.phase === 'scanning' ? `훑는 중… 파일 ${num(S.scan.scanned)}개` : st.root ? (st.root_label || st.root) : '폴더를 고르세요',
       3: !p ? '미리보기 없음' : p.stale ? '미리보기를 다시 만드세요' : `앨범 ${num(p.folders)}개 · 선택 ${num(S.selection.count)}개`,
       4: ({ idle: '시작 전', running: `올리는 중 ${Math.floor(pct)}%`, waiting: `기다리는 중 ${Math.floor(pct)}%`, stopping: '멈추는 중…',
@@ -241,10 +244,10 @@
       : (c.error ? `<span class="muted">${esc(c.error)}</span>` : '아직 없음 <span class="muted">— 아래 순서대로 만든 뒤 고르세요</span>');
     $('btnClient').textContent = c.ok ? '다른 열쇠 파일로' : '열쇠 파일 선택';
     $('btnClient').disabled = S.uploading;
-    const guideOn = !c.ok || guideOpen;
+    const guideOn = !c.ok || (guideOpen === null ? !a.logged_in : guideOpen);
     show($('guide'), guideOn);
     show($('btnGuide'), c.ok);
-    $('btnGuide').textContent = guideOpen ? '만드는 법 접기' : '만드는 법 보기';
+    $('btnGuide').textContent = guideOn ? '만드는 법 접기' : '만드는 법 보기';
     $('btnGuide').setAttribute('aria-expanded', String(guideOn));
 
     $('tileLogin').className = 'tile' + (waiting ? ' wait' : a.logged_in ? ' ok' : a.problem ? ' bad' : '');
@@ -264,6 +267,76 @@
     $('accountChip').classList.toggle('on', a.logged_in);
     $('accountText').textContent = a.logged_in ? (a.email || '로그인됨') : '로그인 안 됨';
     $('accountChip').title = a.logged_in ? `${a.email || ''} 계정에 올립니다` : '1단계에서 로그인하세요';
+    if (guideOn) renderGuide();
+  }
+
+  // ── 열쇠 만드는 법 ──
+  // 차례(가장 먼 단계)는 앱이 아는 상태가 먼저다: 로그인했으면 다 끝남(9), 열쇠가 있으면 로그인 차례(8),
+  // 그 밖에는 사용자가 '마쳤어요'로 간 단계(settings.guide_step, 열쇠 고르기 앞인 7까지).
+  function guideFar() {
+    if (S.account.logged_in) return 9;
+    if (S.client.ok) return 8;
+    return Math.max(1, Math.min(7, Number(S.settings.guide_step) || 1));
+  }
+  function renderGuide() {
+    const far = guideFar();
+    if (far !== gFarPrev || !gView) { gView = Math.min(far, 8); gFarPrev = far; gHelpOn = false; }
+    document.querySelectorAll('#guideList .g-item').forEach((b) => {
+      const n = Number(b.dataset.n);
+      b.classList.toggle('done', n < far);
+      b.classList.toggle('cur', n === far);
+      b.classList.toggle('view', n === gView);
+      if (n === gView) b.setAttribute('aria-current', 'step'); else b.removeAttribute('aria-current');
+      // 화면 읽기 프로그램에도 끝남·차례가 들리게(체크 표시는 색과 모양뿐이라)
+      b.setAttribute('aria-label', `${n}. ${b.querySelector('.g-name').textContent} — ${n < far ? '끝남' : n === far ? '지금 차례' : '남음'}`);
+    });
+    document.querySelectorAll('#guide .g-step').forEach((el) => {
+      const on = Number(el.dataset.n) === gView;
+      el.hidden = !on;
+      const help = el.querySelector('.g-help');
+      if (help) help.hidden = !(on && gHelpOn);
+    });
+    $('gHelp').textContent = gHelpOn ? '도움말 접기' : '막히면';
+    $('gHelp').setAttribute('aria-expanded', String(gHelpOn));
+    $('guideCount').textContent = far > 8 ? '8 / 8 · 다 했습니다' : `${far} / 8 단계 차례`;
+    $('gPrev').disabled = gView <= 1;
+    show($('gNext'), gView <= 6);   // 7·8은 앱이 열쇠·로그인을 알아채 저절로 넘어간다
+    $('gNext').textContent = gView === 6 ? '마쳤어요, 열쇠 고르기 →' : '마쳤어요, 다음 →';
+    document.querySelectorAll('#guide [data-proxy]').forEach((b) => {
+      const src = $(b.dataset.proxy);
+      b.disabled = src.disabled || src.classList.contains('hidden');
+    });
+  }
+  function guideGo(n) {
+    gView = Math.max(1, Math.min(8, n));
+    gHelpOn = false;
+    renderGuide();
+    $('guideScroll').scrollTop = 0;
+  }
+
+  // 복사: 클립보드 API → 안 되면 숨은 칸 + execCommand → 그래도 안 되면 글자를 골라 두고 Ctrl+C 안내
+  async function copyText(text, el) {
+    let ok = false;
+    try { await navigator.clipboard.writeText(text); ok = true; } catch (e) { /* 아래 방법으로 */ }
+    if (!ok) {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.setAttribute('readonly', '');
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+      ta.remove();
+    }
+    if (ok) { toast('복사했습니다'); return; }
+    if (!el) { toast(`복사하지 못했습니다. 직접 입력하세요: ${text}`, true); return; }
+    const r = document.createRange();
+    r.selectNodeContents(el);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(r);
+    toast('복사하지 못했습니다. 골라 둔 글자를 Ctrl+C로 복사하세요', true);
   }
 
   function renderFolder() {
@@ -635,11 +708,35 @@
   $('miniProg').addEventListener('click', () => go(4));
 
   $('btnClient').addEventListener('click', () => act('client', {}));
-  $('btnGuide').addEventListener('click', () => { guideOpen = !guideOpen; if (S) renderAccount(); });
-  $('guide').addEventListener('click', (e) => {
-    const b = e.target.closest('button[data-guide]');
-    if (b) act('guide', { page: b.dataset.guide });
+  $('btnGuide').addEventListener('click', () => {
+    guideOpen = $('guide').classList.contains('hidden');
+    if (S) renderAccount();
   });
+  $('guide').addEventListener('click', (e) => {
+    const g = e.target.closest('button[data-guide]');
+    if (g) { act('guide', { page: g.dataset.guide }); return; }
+    const p = e.target.closest('button[data-proxy]');
+    if (p) { $(p.dataset.proxy).click(); return; }
+    const c = e.target.closest('button[data-copy], button[data-copy-text]');
+    if (c) {
+      const src = c.dataset.copy ? $(c.dataset.copy) : null;
+      copyText(src ? src.textContent : c.dataset.copyText, src);
+    }
+  });
+  $('guideList').addEventListener('click', (e) => {
+    const b = e.target.closest('.g-item');
+    if (b) guideGo(Number(b.dataset.n));
+  });
+  $('gPrev').addEventListener('click', () => guideGo(gView - 1));
+  $('gNext').addEventListener('click', () => {
+    const next = gView + 1;
+    const save = next > guideFar();
+    guideGo(next);
+    // 7단계부터는 이 버튼이 숨으므로, 키보드로 누른 사람의 초점을 지금 단계 목록 줄로 옮긴다
+    if ($('gNext').classList.contains('hidden')) document.querySelector('#guideList .g-item.view').focus();
+    if (save) act('guide_step', { step: next });   // 차례를 앞으로 옮겨 다시 열어도 여기서 시작
+  });
+  $('gHelp').addEventListener('click', () => { gHelpOn = !gHelpOn; renderGuide(); });
   $('btnLogin').addEventListener('click', () => act('login', {}));
   $('btnLoginCancel').addEventListener('click', () => act('login_cancel', {}));
   $('btnLogout').addEventListener('click', () => act('logout', {}, '로그아웃했습니다'));

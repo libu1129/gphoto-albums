@@ -26,6 +26,7 @@ GUIDE_URLS = {
     "library": "https://console.cloud.google.com/apis/library/photoslibrary.googleapis.com",
     "branding": "https://console.cloud.google.com/auth/branding",
     "audience": "https://console.cloud.google.com/auth/audience",
+    "scopes": "https://console.cloud.google.com/auth/scopes",      # 데이터 액세스(범위)
     "clients": "https://console.cloud.google.com/auth/clients",
     "photos": "https://photos.google.com/albums",
 }
@@ -60,7 +61,8 @@ class Controller:
         self.allow_close = False
         self._lock = threading.RLock()
         self._settings_path = self.data / "settings.json"
-        self.settings = {"root": "", "include_root": False, "include_videos": True}
+        # guide_step: '열쇠 만드는 법'에서 '마쳤어요'로 간 가장 먼 단계(1~8). 다시 열어도 그 단계부터 보인다
+        self.settings = {"root": "", "include_root": False, "include_videos": True, "guide_step": 1}
         self._load_settings()
         self.scan_state = {"phase": "idle", "scanned": 0, "current": "", "error": None}
         self.plan = None
@@ -267,6 +269,11 @@ class Controller:
         except LoginError as e:
             raise UserError(str(e)) from e
         self.log(f"열쇠 파일을 등록했습니다(프로젝트 {info.get('project') or '?'}).")
+        with self._lock:  # 안내 1~7단계는 끝난 것: 나중에 열쇠가 깨져도 안내가 처음부터 다시 뜨지 않게
+            cur = self.settings.get("guide_step")
+            if not isinstance(cur, int) or cur < 8:
+                self.settings["guide_step"] = 8
+                self._save_settings()
         return info
 
     def open_guide(self, page):
@@ -275,6 +282,17 @@ class Controller:
             raise UserError("알 수 없는 안내 페이지")
         webbrowser.open(url)
         return True
+
+    def set_guide_step(self, step):
+        try:
+            n = int(step)
+        except (TypeError, ValueError, OverflowError):
+            raise UserError("안내 단계 번호가 잘못됐습니다.") from None
+        n = max(1, min(8, n))
+        with self._lock:  # 다른 설정 저장과 겹쳐 settings.json이 반쯤 써지지 않게
+            self.settings["guide_step"] = n
+            self._save_settings()
+        return n
 
     def login(self):
         if self.login_state["phase"] == "waiting":

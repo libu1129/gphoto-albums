@@ -27,8 +27,11 @@ class FakeAuth:
     def __init__(self):
         self.problem = None
         self.logged = True
+        self.client_ok = True     # False면 열쇠 파일이 아직 없는 처음 상태
 
     def client_info(self):
+        if not self.client_ok:
+            return {"ok": False}
         return {"ok": True, "project": "photo-upload-123", "client": "123456789012"}
 
     def account(self):
@@ -295,6 +298,74 @@ class E2ETest(unittest.TestCase):
             self.assertIn("스캔", [a["title"] for a in self.fake.albums.values()])
             self.assertEqual(errors, [])
             b.close()
+
+    def test_4_key_guide(self):
+        """열쇠 만드는 법: 8단계 목록, 마쳤어요로 다음, 다시 열어도 이어서, 복사, 열쇠를 고르면 로그인 차례."""
+        from playwright.sync_api import expect, sync_playwright
+        auth = self.ctl.auth
+        auth.client_ok, auth.logged = False, False     # 열쇠도 로그인도 없는 처음 상태
+        try:
+            with sync_playwright() as pw:
+                b = pw.chromium.launch()
+                ctx = b.new_context(viewport={"width": 1120, "height": 860})
+                ctx.grant_permissions(["clipboard-read", "clipboard-write"])
+                page = ctx.new_page()
+                errors = []
+                page.on("pageerror", lambda e: errors.append(str(e)))
+                page.goto(self.srv.url)
+                step = lambda n: page.locator(f"#guide .g-step[data-n='{n}']")  # noqa: E731
+                item = lambda n: page.locator(f"#guideList .g-item[data-n='{n}']")  # noqa: E731
+                expect(page.locator("#stepTitle")).to_have_text("계정 연결")
+                expect(page.locator("#guide")).to_be_visible()
+                expect(page.locator("#guideList .g-item")).to_have_count(8)
+                expect(step(1)).to_be_visible()
+                expect(page.locator("#guideCount")).to_contain_text("1 / 8")
+                expect(step(1).locator(".g-help")).to_be_hidden()
+                page.click("#gHelp")
+                expect(step(1).locator(".g-help")).to_be_visible()
+                page.screenshot(path=str(self.shots / "14_guide_start.png"), animations="disabled")
+                page.click("#gNext")
+                expect(step(2)).to_be_visible()
+                expect(page.locator("#guideCount")).to_contain_text("2 / 8")
+                expect(item(1)).to_have_class(re.compile(r"\bdone\b"))
+                page.reload()                                  # 다시 열어도 이어서
+                expect(step(2)).to_be_visible()
+                expect(page.locator("#guideCount")).to_contain_text("2 / 8")
+                item(5).click()                                # 앞 단계를 미리 봐도 차례는 그대로
+                expect(step(5)).to_contain_text("데이터 액세스")
+                expect(page.locator("#guideCount")).to_contain_text("2 / 8")
+                page.click("#guide [data-copy='scopeList']")
+                expect(page.locator("#toast")).to_have_text("복사했습니다")
+                clip = page.evaluate("navigator.clipboard.readText()")
+                self.assertIn("photoslibrary.appendonly", clip)
+                self.assertIn("photoslibrary.readonly.appcreateddata", clip)
+                page.screenshot(path=str(self.shots / "15_guide_scopes.png"), animations="disabled")
+                item(6).click()
+                expect(step(6).locator(".g-warn")).to_contain_text("다시 받을 수 없습니다")
+                page.locator("#gNext").focus()
+                page.keyboard.press("Enter")                   # 키보드로 6단계 '마쳤어요'
+                expect(step(7)).to_be_visible()
+                expect(item(7)).to_be_focused()                # 숨는 버튼 대신 목록 줄로 초점이 간다
+                expect(page.locator("#guideCount")).to_contain_text("7 / 8")
+                # 창 최소 크기에서 가장 긴 3단계: 설명은 안에서 스크롤해도 '마쳤어요'는 보인다
+                page.set_viewport_size({"width": 900, "height": 640})
+                item(3).click()
+                page.click("#gHelp")
+                box = page.locator("#gNext").bounding_box()
+                self.assertIsNotNone(box)
+                self.assertLessEqual(box["y"] + box["height"], 640)
+                page.screenshot(path=str(self.shots / "16_guide_narrow.png"), animations="disabled")
+                # 열쇠 파일을 고르면(앱이 알아챔) 1~7 끝, 로그인 차례
+                auth.client_ok = True
+                expect(page.locator("#guideCount")).to_contain_text("8 / 8", timeout=5000)
+                expect(step(8)).to_be_visible()
+                expect(step(8).locator("[data-proxy='btnLogin']")).to_be_enabled()
+                expect(item(7)).to_have_class(re.compile(r"\bdone\b"))
+                self.assertEqual(self.ctl.settings["guide_step"], 7)   # 저장값은 사용자가 '마쳤어요'로 간 곳 그대로
+                self.assertEqual(errors, [])
+                b.close()
+        finally:
+            auth.client_ok, auth.logged = True, True
 
 
 if __name__ == "__main__":
