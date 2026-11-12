@@ -282,6 +282,35 @@ class EngineTest(unittest.TestCase):
         self.assertEqual(p.files_failed, 2)                      # 거절된 1개 + bad_c
         self.assertEqual(p.bytes_done, p.bytes_total)            # 막대가 100%에 닿는다
 
+    def test_unaccepted_bytes_not_counted_while_waiting(self):
+        """429·서버 오류·끊김으로 기다리는 동안 진행량에는 서버가 받아들인 바이트만 남는다."""
+        total = [0]
+        at_wait = []
+
+        def on_wait(reason, until):
+            if reason:                      # 기다림이 끝날 때도 (None, None)으로 불린다
+                at_wait.append(total[0])
+
+        def on_bytes(d):
+            total[0] += d
+
+        client = PhotosClient(requests.Session(), self.fake.base, stop=threading.Event(), on_wait=on_wait,
+                              sleep=self.clock.sleep, clock=self.clock.time, resumable_min=RESUMABLE_MIN,
+                              log=self.logs.append)
+        files = {f.name: f for fp in scan(self.root, include_videos=True).folders for f in fp.files}
+        cases = [("a.jpg", "daily", "upload", {}),                  # 작은 파일: 하루 한도
+                 ("v.mp4", "rate", "resumable", {}),                # 큰 파일: 429
+                 ("v.mp4", "500", "resumable", {}),                 # 큰 파일: 서버 오류
+                 ("v.mp4", "drop", "resumable", {"after": 120_000})]  # 큰 파일: 보내다 끊김
+        for name, kind, where, kw in cases:
+            with self.subTest(kind=kind, where=where):
+                total[0] = 0
+                at_wait.clear()
+                self.fake.add_fault(kind, where, **kw)
+                client.upload(files[name], on_bytes)
+                self.assertEqual(at_wait, [0])                      # 기다림을 시작할 때 0
+                self.assertEqual(total[0], files[name].size)        # 끝나면 파일 크기
+
     def test_forbidden_stops_with_message(self):
         self.fake.add_fault("403", "upload")
         p, _ = self.run_engine()

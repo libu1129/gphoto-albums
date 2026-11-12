@@ -38,7 +38,8 @@ class FakePhotos:
         self.httpd.shutdown()
         self.httpd.server_close()
 
-    # 고장 넣기: kind = rate | daily | 500 | drop, where = upload | resumable | albums | batch
+    # 고장 넣기: kind = rate | daily | 500 | 400 | 403 | drop, where = upload | resumable | albums | batch
+    # (resumable은 이어 올리기의 바이트 보내기 요청. drop은 after 바이트를 받은 뒤 연결을 끊는다)
     def add_fault(self, kind, where, times=1, **kw):
         with self.lock:
             self.faults.append(dict(kind=kind, where=where, times=times, **kw))
@@ -96,18 +97,21 @@ class FakePhotos:
                 if f["kind"] == "drop":
                     return f  # 호출한 쪽이 처리
                 self._body()
-                if f["kind"] == "rate":
+                self._fault_reply(f["kind"])
+                return True
+
+            def _fault_reply(self, kind):
+                if kind == "rate":
                     self._err(429, MSG_RATE, "RESOURCE_EXHAUSTED")
-                elif f["kind"] == "daily":
+                elif kind == "daily":
                     self._err(429, MSG_DAILY, "RESOURCE_EXHAUSTED")
-                elif f["kind"] == "500":
+                elif kind == "500":
                     self._err(500, "Internal error encountered.", "INTERNAL")
-                elif f["kind"] == "400":
+                elif kind == "400":
                     self._err(400, "Request contains an invalid argument.", "INVALID_ARGUMENT")
-                elif f["kind"] == "403":
+                elif kind == "403":
                     self._err(403, "Photos Library API has not been used in project 123 before or it is disabled.",
                               "PERMISSION_DENIED")
-                return True
 
             def do_GET(self):  # noqa: N802
                 path = urlparse(self.path).path
@@ -233,6 +237,9 @@ class FakePhotos:
                     except OSError:
                         pass
                     return
+                if f:  # 429·500 등: 본문은 끝까지 읽어 버리고(받은 양에 안 넣음) 오류로 답한다
+                    self._body()
+                    return self._fault_reply(f["kind"])
                 data = self.rfile.read(n) if n else b""
                 with fake.lock:
                     s["received"] += len(data)

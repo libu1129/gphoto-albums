@@ -163,6 +163,8 @@ class PhotosClient:
         self.rate_wait, self.rate_cap, self.daily_wait = rate_wait, rate_cap, daily_wait
         self.net_wait, self.net_cap, self.max_5xx = net_wait, net_cap, max_5xx
         self._n429 = 0  # 잇단 429 횟수. 성공하면 0
+        # 파일 바이트를 올리는 동안만 걸린다: 기다리기 전에 아직 받아들여지지 않은 바이트를 진행량에서 되돌린다
+        self._before_wait = None
 
     # ── 공통 ──
     def _check_stop(self):
@@ -170,6 +172,8 @@ class PhotosClient:
             raise StopRequested()
 
     def _wait(self, seconds, reason):
+        if self._before_wait is not None:
+            self._before_wait()
         until = self._clock() + seconds
         self._on_wait(reason, until)
         try:
@@ -271,20 +275,25 @@ class PhotosClient:
             sent[0] += n
             on_bytes(n)
 
-        def factory():
-            if sent[0]:  # 다시 보낼 때 진행량을 되돌린다
+        def rollback():  # 이번 시도에서 센 바이트를 되돌린다(기다리기 전·다시 보내기 전·실패 때)
+            if sent[0]:
                 on_bytes(-sent[0])
                 sent[0] = 0
+
+        def factory():
+            rollback()
             return _Reader(f.path, 0, f.size, self.stop, count)
 
         headers = {"Content-Type": "application/octet-stream",
                    "X-Goog-Upload-Content-Type": mime, "X-Goog-Upload-Protocol": "raw"}
+        self._before_wait = rollback
         try:
             r = self._send("POST", f"{self.base}/uploads", headers=headers, body_factory=factory)
         except BaseException:
-            if sent[0]:
-                on_bytes(-sent[0])
+            rollback()
             raise
+        finally:
+            self._before_wait = None
         token = r.text.strip()
         if not token:
             raise ApiError(r.status_code, "업로드 토큰이 비어 있습니다")
@@ -301,8 +310,12 @@ class PhotosClient:
             on_bytes(v - counted[0])
             counted[0] = v
 
+        offset = 0  # 서버가 받았다고 확인한 바이트. 기다리기 전에는 진행량을 여기까지 되돌린다
+        self._before_wait = lambda: set_counted(offset)
         try:
             for _restart in range(3):
+                offset = 0       # 새 세션은 처음부터 보낸다: 지난 세션에서 센 바이트를 버린다
+                set_counted(0)
                 r = self._send("POST", f"{self.base}/uploads", headers={
                     "Content-Length": "0", "X-Goog-Upload-Command": "start",
                     "X-Goog-Upload-Content-Type": mime, "X-Goog-Upload-Protocol": "resumable",
@@ -310,8 +323,6 @@ class PhotosClient:
                 url = r.headers.get("X-Goog-Upload-URL")
                 if not url:
                     raise ApiError(r.status_code, "이어 올리기 주소를 받지 못했습니다")
-                offset = 0
-                set_counted(0)
                 tries = 0
                 while True:
                     self._check_stop()
@@ -372,6 +383,8 @@ class PhotosClient:
         except BaseException:
             set_counted(0)
             raise
+        finally:
+            self._before_wait = None
 
     # ── 앨범·항목 ──
     def create_album(self, title):
