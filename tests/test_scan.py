@@ -42,6 +42,24 @@ class ScanTest(unittest.TestCase):
                                              "2023/제주여행": "사진_2023_제주여행"})
         self.assertEqual([fp.key for fp in res.folders], ["", "2023", "2023/제주여행"])
 
+    def test_custom_root_title(self):
+        """최상위 폴더 이름을 따로 정하면 앞에 붙는 이름과 바로 아래 파일의 앨범 이름만 바뀐다. 경로 표시용 root_name은 그대로."""
+        touch(self.root / "2023" / "제주여행" / "a.jpg")
+        touch(self.root / "c.heic")
+        res = S.scan(self.root, root_title="우리 집")
+        self.assertEqual(self.titles(res), {"": "우리 집", "2023/제주여행": "2023_제주여행"})
+        res2 = S.scan(self.root, include_root=True, root_title="  우리 집 ")
+        self.assertEqual(self.titles(res2), {"": "우리 집", "2023/제주여행": "우리 집_2023_제주여행"})
+        self.assertEqual(res2.root_name, "사진")
+        res3 = S.scan(self.root, include_root=True, root_title="")
+        self.assertEqual(self.titles(res3), {"": "사진", "2023/제주여행": "사진_2023_제주여행"})
+
+    def test_clean_root_title(self):
+        """제어 글자는 빈칸, 깨진 반쪽 글자는 빼고, 앞뒤 빈칸을 자르고, 맥 방식 한글은 한 글자 꼴로."""
+        self.assertEqual(S.clean_root_title(" 우리\t집\ud800 "), "우리 집")
+        self.assertEqual(S.clean_root_title(unicodedata.normalize("NFD", "가족")), "가족")
+        self.assertEqual(S.clean_root_title(None), "")
+
     def test_nfd_folder_becomes_nfc_title(self):
         nfd = unicodedata.normalize("NFD", "여행")
         touch(self.root / nfd / "a.jpg")

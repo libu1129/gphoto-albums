@@ -81,6 +81,73 @@ class ControllerTest(unittest.TestCase):
         self.auth.client_info = lambda: {"ok": True, "project": "other", "client": "999", "client_id": "999-x"}
         self.assertEqual(self.ctl.albums()["items"][0]["done"], 0)
 
+    def test_root_title_kept_per_folder(self):
+        """앨범 이름에 쓸 최상위 폴더 이름: 폴더마다 따로 남고(오가도 돌아옴), 다시 열어도 남고, 검사한다."""
+        with self.assertRaises(UserError):
+            self.ctl.set_options(include_root=True, root_title="가족")   # 폴더를 고르기 전
+        self.assertFalse(self.ctl.settings["include_root"])                # 거절하면 다른 설정도 그대로
+        self.ctl.set_root(str(self.root))
+        out = self.ctl.set_options(root_title="  우리\t집 ")
+        self.assertEqual(out["root_title"], "우리 집")
+        self.assertNotIn("root_titles", out)
+        st = self.ctl.snapshot()["settings"]
+        self.assertEqual((st["root_title"], st["root_label"]), ("우리 집", "사진"))
+        self.assertNotIn("root_titles", st)
+        for bad in ("가" * 101, 3):
+            with self.assertRaises(UserError):
+                self.ctl.set_options(root_title=bad)
+        self.assertEqual(self.ctl.snapshot()["settings"]["root_title"], "우리 집")
+        # 다른 폴더로 갔다가 돌아오면 그 폴더의 이름이 돌아온다. 대소문자만 다른 경로도 같은 폴더로 본다
+        other = self.root.parent / "다른 폴더"
+        other.mkdir()
+        self.ctl.set_root(str(other))
+        self.assertEqual(self.ctl.snapshot()["settings"]["root_title"], "")
+        self.ctl.set_root(str(self.root).upper())
+        self.assertEqual(self.ctl.snapshot()["settings"]["root_title"], "우리 집")
+        again = Controller(self.ctl.data, auth=self.auth, photos_base=self.fake.base)
+        try:
+            self.assertEqual(again.snapshot()["settings"]["root_title"], "우리 집")
+        finally:
+            again.shutdown()
+        # 폴더 이름과 같거나 빈칸·탭뿐이면 따로 두지 않는다(폴더 이름을 씀)
+        for same in ("사진", " \t "):
+            self.ctl.set_options(root_title="우리 집")
+            self.assertEqual(self.ctl.set_options(root_title=same)["root_title"], "")
+            self.assertEqual(len(self.ctl.settings["root_titles"]), 0)
+
+    def test_broken_root_titles_in_settings_file(self):
+        """설정 파일의 폴더별 이름이 깨져 있어도(목록·숫자) 시작하고 빈 것으로 본다."""
+        (self.ctl.data / "settings.json").write_text(
+            '{"root": "", "root_titles": ["x", 1], "include_videos": false}', encoding="utf-8")
+        again = Controller(self.ctl.data, auth=self.auth, photos_base=self.fake.base)
+        try:
+            self.assertEqual(again.settings["root_titles"], {})
+            self.assertFalse(again.settings["include_videos"])
+        finally:
+            again.shutdown()
+
+    def test_root_title_change_keeps_existing_album(self):
+        """이름을 바꾸면 미리보기가 낡아 올리기를 막고, 다시 만들어 올려도 이미 만든 앨범을 이어 쓴다(새 앨범 없음)."""
+        self.ctl.set_root(str(self.root))
+        self.ctl.set_options(include_root=True, root_title="가족")
+        self.scan_and_select()
+        self.assertEqual(self.ctl.plan.folders[0].title, "가족_앨범")
+        self.ctl.start()
+        self.wait_upload()
+        self.assertEqual([a["title"] for a in self.fake.albums.values()], ["가족_앨범"])
+        self.ctl.set_options(root_title="우리 집")
+        self.assertTrue(self.ctl.snapshot()["plan"]["stale"])
+        with self.assertRaises(UserError):
+            self.ctl.start()
+        (self.root / "앨범" / "새사진.jpg").write_bytes(b"y" * 500)
+        self.scan_and_select()
+        item = self.ctl.albums()["items"][0]
+        self.assertEqual((item["title"], item["album_titles"]), ("우리 집_앨범", ["가족_앨범"]))
+        self.ctl.start()
+        self.wait_upload()
+        self.assertEqual(len(self.fake.albums), 1)
+        self.assertEqual(len(next(iter(self.fake.albums.values()))["items"]), 31)
+
     def test_choosing_key_marks_guide_until_login(self):
         """열쇠 파일을 고르면 안내 1~7단계는 끝난 것으로 남긴다(나중에 열쇠가 깨져도 처음부터 다시 뜨지 않게)."""
         self.ctl.set_guide_step(3)

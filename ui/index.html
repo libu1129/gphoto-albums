@@ -232,6 +232,11 @@ https://www.googleapis.com/auth/userinfo.email</pre><button class="small" data-c
             <input id="rootInput" class="path" placeholder="예: D:\사진  또는  \\NAS\photo" spellcheck="false" autocomplete="off">
             <button id="btnRoot">폴더 선택…</button>
           </div>
+          <label class="field-label sub" for="rootTitle">앨범 이름에 쓸 최상위 폴더 이름</label>
+          <div class="field-row wrap">
+            <input id="rootTitle" class="path name" maxlength="100" spellcheck="false" autocomplete="off">
+            <span class="muted" id="rootTitleHint">비워 두면 폴더 이름을 그대로 씁니다.</span>
+          </div>
           <div class="options">
             <label class="check"><input type="checkbox" id="optRoot"> 앨범 이름 앞에 최상위 폴더 이름도 넣기</label>
             <label class="check"><input type="checkbox" id="optVideo"> 영상도 올리기</label>

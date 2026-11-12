@@ -211,6 +211,9 @@ button.chip-copy:hover:not(:disabled) { background: var(--accent-soft); filter: 
 /* ── 2. 사진 폴더 ── */
 .field-label { display: block; font-weight: 600; margin-bottom: 6px; }
 .field-row { display: flex; gap: 8px; }
+.field-label.sub { margin-top: 14px; }
+.field-row.wrap { flex-wrap: wrap; align-items: center; column-gap: 12px; row-gap: 4px; }
+input.path.name { flex: 0 1 280px; width: 280px; }
 .options { display: flex; gap: 22px; flex-wrap: wrap; margin-top: 12px; }
 .example { padding: 10px 12px; background: var(--accent-soft); border-radius: 6px; font-size: 13.5px; overflow-wrap: anywhere; line-height: 1.7; }
 

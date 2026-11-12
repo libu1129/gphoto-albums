@@ -177,6 +177,31 @@ class E2ETest(unittest.TestCase):
             page.click("#btnNext")
             expect(page.locator("#staleBox")).to_be_hidden()
 
+            # 앨범 이름에 쓸 최상위 폴더 이름: 적는 동안 예시가 바뀌고, 적고 바로 '미리보기 만들기'를 눌러도 새 이름으로 훑는다
+            page.click("#btnPrev")
+            expect(title).to_have_text("사진 폴더")
+            page.check("#optRoot")
+            expect(page.locator("#rootTitle")).to_have_attribute("placeholder", "사진")
+            page.fill("#rootTitle", "우리 집")
+            expect(page.locator("#example")).to_contain_text("우리 집_2023_제주여행")
+            page.screenshot(path=str(self.shots / "02b_root_title.png"), animations="disabled")
+            page.click("#btnScan")
+            expect(title).to_have_text("앨범 고르기", timeout=15000)
+            expect(page.locator("#staleBox")).to_be_hidden()
+            renamed = page.locator("#albumBody tr", has_text="우리 집_2023_제주여행")
+            expect(renamed).to_contain_text("사진\\2023\\제주여행")   # 경로 칸은 실제 폴더 이름
+            # 되돌린다: 이름을 비우고 옵션을 끈 뒤 다시 만든다
+            page.click("#btnPrev")
+            page.fill("#rootTitle", "")
+            page.press("#rootTitle", "Enter")
+            expect(page.locator("#example")).not_to_contain_text("우리 집")
+            page.uncheck("#optRoot")
+            expect(page.locator("#scanText")).to_contain_text("다시 만드세요")
+            page.click("#btnScan")
+            expect(title).to_have_text("앨범 고르기", timeout=15000)
+            expect(page.locator("#albumBody")).not_to_contain_text("우리 집")
+            expect(page.locator("#staleBox")).to_be_hidden()
+
             row = page.locator("#albumBody tr", has_text="2023_제주여행")
             row.locator("input[type=checkbox]").click()
             expect(page.locator("#selText")).to_contain_text("선택 1개")

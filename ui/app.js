@@ -111,6 +111,7 @@
   let kicked = false;        // 읽는 도중에 동작이 있었다: 끝나는 대로 바로 다시 읽는다
   let renderFailed = false;
   let scanWatch = null;      // 이 화면에서 시작한 훑기: 끝나면 3단계로 넘긴다
+  let titleSaving = null;    // 저장 중인 '최상위 폴더 이름'. '미리보기 만들기'가 끝나길 기다린다
   let guideOpen = null;      // 열쇠 안내를 펴 둘지(사용자가 고름). null이면 열쇠·로그인이 다 될 때까지 저절로 편다
   let gView = 0;             // 안내에서 보고 있는 단계(1~8)
   let gFarPrev = 0;          // 지난번 그릴 때의 차례 단계(바뀌면 그 단계를 보여 준다)
@@ -339,6 +340,17 @@
     toast('복사하지 못했습니다. 골라 둔 글자를 Ctrl+C로 복사하세요', true);
   }
 
+  // 앨범 이름 예시. 이름 칸에 적는 중(저장 전)인 이름도 바로 보인다. 경로 쪽(code)은 실제 폴더 이름이다
+  function renderExample() {
+    const st = S.settings;
+    const lbl = st.root_label || '사진';
+    const tin = $('rootTitle');
+    const name = (document.activeElement === tin ? tin.value : (st.root_title || '')).trim() || lbl;
+    const ex = st.include_root ? `${name}_2023_제주여행` : '2023_제주여행';
+    $('example').innerHTML = `<code>${esc(lbl)}\\2023\\제주여행</code> 폴더 → 앨범 <b>${esc(ex)}</b><br>` +
+      `<code>${esc(lbl)}</code> 바로 아래 파일 → 앨범 <b>${esc(name)}</b>`;
+  }
+
   function renderFolder() {
     const st = S.settings;
     const inp = $('rootInput');
@@ -348,10 +360,12 @@
     const scanning = S.scan.phase === 'scanning';
     const lockIt = S.uploading || scanning;
     inp.disabled = lockIt; $('btnRoot').disabled = lockIt; $('optRoot').disabled = lockIt; $('optVideo').disabled = lockIt;
-    const lbl = st.root_label || '사진';
-    const ex = st.include_root ? `${lbl}_2023_제주여행` : '2023_제주여행';
-    $('example').innerHTML = `<code>${esc(lbl)}\\2023\\제주여행</code> 폴더 → 앨범 <b>${esc(ex)}</b><br>` +
-      `<code>${esc(lbl)}</code> 바로 아래 파일 → 앨범 <b>${esc(lbl)}</b>`;
+    const tin = $('rootTitle');
+    if (document.activeElement !== tin) tin.value = st.root_title || '';
+    tin.placeholder = st.root_label || '';
+    tin.disabled = lockIt || !st.root;
+    $('rootTitleHint').textContent = st.root ? `비워 두면 폴더 이름(${st.root_label}) 그대로 씁니다.` : '폴더를 고르면 정할 수 있습니다.';
+    renderExample();
     let cls = '', text;
     if (scanning) { cls = 'run'; text = `훑는 중… 파일 ${num(S.scan.scanned)}개 · ${S.scan.current || ''}`; }
     else if (S.scan.phase === 'error') { cls = 'err'; text = S.scan.error || '폴더를 훑지 못했습니다.'; }
@@ -691,6 +705,7 @@
   }
 
   async function startScan() {
+    if (titleSaving) await titleSaving;   // 이름 칸에 적고 바로 눌렀으면(change 저장이 먼저 나감) 저장이 끝난 뒤 훑는다
     const w = { from: S && S.plan ? S.plan.version : -1, after: Infinity };
     scanWatch = w;
     if (await act('scan', {}) === undefined) {
@@ -751,6 +766,19 @@
   }
   rootInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); rootInput.blur(); } });
   rootInput.addEventListener('change', applyRoot);
+  // 앨범 이름에 쓸 최상위 폴더 이름: 적는 동안은 예시만 바꾸고, Enter·포커스 이동(change)에서 저장한다
+  const rootTitle = $('rootTitle');
+  rootTitle.addEventListener('input', () => { if (S) renderExample(); });
+  rootTitle.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); rootTitle.blur(); } });
+  rootTitle.addEventListener('change', () => {
+    const v = rootTitle.value.trim();
+    if (!S || v === (S.settings.root_title || '')) return;
+    const p = act('options', { root_title: v }).then((r) => {
+      if (r === undefined && S) { rootTitle.value = S.settings.root_title || ''; renderExample(); }
+    });
+    titleSaving = p;
+    p.finally(() => { if (titleSaving === p) titleSaving = null; });
+  });
   $('optRoot').addEventListener('change', (e) => act('options', { include_root: e.target.checked }));
   $('optVideo').addEventListener('change', (e) => act('options', { include_videos: e.target.checked }));
   $('btnScan').addEventListener('click', startScan);

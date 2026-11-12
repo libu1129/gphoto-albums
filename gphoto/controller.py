@@ -15,8 +15,8 @@ from . import __version__, winutil
 from .auth import Auth, LoginError
 from .engine import Engine, Progress
 from .photos_api import API_BASE, PhotosClient
-from .scan import (DAILY_QUOTA, RESUMABLE_MIN, ScanCancelled, ScanError, estimate_requests,
-                   normalize_root, root_label, scan)
+from .scan import (DAILY_QUOTA, RESUMABLE_MIN, ROOT_TITLE_MAX, ScanCancelled, ScanError,
+                   clean_root_title, estimate_requests, normalize_root, root_label, scan)
 from .store import Store
 
 log = logging.getLogger("gphoto")
@@ -62,7 +62,10 @@ class Controller:
         self._lock = threading.RLock()
         self._settings_path = self.data / "settings.json"
         # guide_step: '열쇠 만드는 법'에서 '마쳤어요'로 간 가장 먼 단계(1~8). 다시 열어도 그 단계부터 보인다
-        self.settings = {"root": "", "include_root": False, "include_videos": True, "guide_step": 1}
+        # root_titles: 최상위 폴더마다 앨범 이름에 쓸 이름(없으면 폴더 이름). 열쇠는 os.path.normcase(root).
+        #   폴더를 오가도(예: PC 사본 ↔ NAS) 그 폴더의 이름이 돌아오고, 다른 폴더에 엉뚱한 이름이 붙지 않게 폴더마다 둔다
+        self.settings = {"root": "", "include_root": False, "include_videos": True, "guide_step": 1,
+                         "root_titles": {}}
         self._load_settings()
         self.scan_state = {"phase": "idle", "scanned": 0, "current": "", "error": None}
         self.plan = None
@@ -98,6 +101,9 @@ class Controller:
                     self.settings[k] = d[k]
         except (OSError, ValueError):
             pass
+        rt = self.settings.get("root_titles")  # 손으로 고쳤거나 저장이 끊긴 파일이어도 시작은 되게
+        self.settings["root_titles"] = ({k: v for k, v in rt.items() if isinstance(k, str) and isinstance(v, str) and v}
+                                        if isinstance(rt, dict) else {})
 
     def _save_settings(self):
         try:
@@ -123,10 +129,28 @@ class Controller:
     def busy(self) -> bool:
         return self.uploading() or self.scanning() or self.login_state["phase"] == "waiting"
 
+    def _root_title(self) -> str:
+        """지금 최상위 폴더에 따로 정해 둔 앨범용 이름. 없으면 ''(폴더 이름을 쓴다)."""
+        root = self.settings["root"]
+        return self.settings["root_titles"].get(os.path.normcase(root), "") if root else ""
+
+    def _title_used(self) -> str:
+        """앨범 이름에 실제로 들어갈 최상위 이름(따로 정한 이름, 없으면 폴더 이름)."""
+        root = self.settings["root"]
+        return self._root_title() or (root_label(root) if root else "")
+
+    def _public_settings(self) -> dict:
+        """화면에 보낼 설정: 폴더별 이름 사전 대신 지금 폴더의 이름만. 부를 때 self._lock을 잡고 있어야 한다."""
+        s = dict(self.settings)
+        s.pop("root_titles", None)
+        s["root_label"] = root_label(s["root"]) if s["root"] else ""
+        s["root_title"] = self._root_title()
+        return s
+
     def _plan_stale(self) -> bool:
         s = self.settings
         return self.plan is not None and self.plan_settings != (s["root"], s["include_root"],
-                                                                 s["include_videos"])
+                                                                 s["include_videos"], self._title_used())
 
     # ── 상태 ──
     def snapshot(self) -> dict:
@@ -151,8 +175,7 @@ class Controller:
                     if fp.key in self.selected:
                         sel_files += len(fp.files)
                         sel_bytes += fp.bytes
-            settings = dict(self.settings)
-            settings["root_label"] = root_label(settings["root"]) if settings["root"] else ""
+            settings = self._public_settings()
             lines = list(self._log)[-200:]
             log_seq = self._log_seq
             n_selected = len(self.selected)
@@ -359,14 +382,33 @@ class Controller:
             self._save_settings()
         return path
 
-    def set_options(self, include_root=None, include_videos=None):
+    def set_options(self, include_root=None, include_videos=None, root_title=None):
+        """root_title: 지금 최상위 폴더를 앨범 이름에서 부를 이름. ''이거나 폴더 이름과 같으면 폴더 이름을 쓴다."""
         with self._lock:
+            titles = None
+            if root_title is not None:  # 검사를 먼저 해서, 거절하면 다른 설정도 바꾸지 않는다
+                root = self.settings["root"]
+                if not root:
+                    raise UserError("먼저 사진 폴더를 고르세요.")
+                if not isinstance(root_title, str):
+                    raise UserError("최상위 폴더 이름이 잘못됐습니다.")
+                name = clean_root_title(root_title)
+                if len(name) > ROOT_TITLE_MAX:
+                    raise UserError(f"최상위 폴더 이름은 {ROOT_TITLE_MAX}자까지 쓸 수 있습니다.")
+                titles = dict(self.settings["root_titles"])  # 새 사전으로 바꿔 끼운다(앞서 내보낸 사전은 그대로)
+                key = os.path.normcase(root)
+                if name and name != root_label(root):
+                    titles[key] = name
+                else:
+                    titles.pop(key, None)
             if include_root is not None:
                 self.settings["include_root"] = bool(include_root)
             if include_videos is not None:
                 self.settings["include_videos"] = bool(include_videos)
+            if titles is not None:
+                self.settings["root_titles"] = titles
             self._save_settings()
-        return dict(self.settings)
+            return self._public_settings()
 
     def scan(self):
         if not self._scan_lock.acquire(blocking=False):
@@ -384,7 +426,9 @@ class Controller:
         root = self.settings["root"]
         if not root:
             raise UserError("먼저 사진 폴더를 고르세요.")
-        inc_root, inc_videos = self.settings["include_root"], self.settings["include_videos"]
+        with self._lock:  # 앨범 이름에 닿는 설정을 한 번에 읽어, 낡음 판정과 만든 이름이 같은 값을 기준으로 하게
+            inc_root, inc_videos = self.settings["include_root"], self.settings["include_videos"]
+            title, title_used = self._root_title(), self._title_used()
         self._scan_stop.clear()
         self.scan_state = {"phase": "scanning", "scanned": 0, "current": root, "error": None}
 
@@ -393,11 +437,12 @@ class Controller:
 
         def run():
             try:
-                res = scan(root, inc_root, inc_videos, progress=prog, stop=self._scan_stop)
+                res = scan(root, inc_root, inc_videos, progress=prog, stop=self._scan_stop,
+                           root_title=title)
                 with self._lock:
                     self.plan = res
                     self.plan_version += 1
-                    self.plan_settings = (root, inc_root, inc_videos)
+                    self.plan_settings = (root, inc_root, inc_videos, title_used)
                     self.selected = set()
                 self.scan_state = {"phase": "done", "scanned": res.files, "current": "",
                                    "error": None}

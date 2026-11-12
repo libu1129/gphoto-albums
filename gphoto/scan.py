@@ -32,7 +32,8 @@ PHOTO_MAX = 200 * 1024 ** 2      # 사진 200MB (API 문서)
 VIDEO_MAX = 20 * 1024 ** 3       # 영상 20GB (API 문서)
 ALBUM_MAX = 20_000               # 앨범당 항목 수 (manage-albums 문서)
 TITLE_MAX = 500                  # 앨범 제목 길이 (manage-albums 문서)
-BATCH = 50                       # batchCreate 한 번에 넣는 수 (upload-media 문서)
+ROOT_TITLE_MAX = 100             # 앨범 이름에 쓸 최상위 폴더 이름(사용자가 적는 칸)의 길이
+BATCH = 50                      # batchCreate 한 번에 넣는 수 (upload-media 문서)
 RESUMABLE_MIN = 50 * 1024 ** 2   # 이보다 크면 이어 올리기 방식 (문서: 50MB 넘으면 성능 문제 가능)
 DAILY_QUOTA = 10_000             # 프로젝트당 하루 요청 한도 (api-limits-quotas 문서)
 
@@ -79,7 +80,7 @@ class FolderPlan:
 @dataclass
 class ScanResult:
     root: str
-    root_name: str
+    root_name: str           # 실제 최상위 폴더 이름(경로·기록 문구용). 앨범 이름에는 따로 정한 이름이 들어갈 수 있다
     include_root: bool
     include_videos: bool
     folders: list
@@ -129,6 +130,18 @@ def root_label(root: str) -> str:
         parts = [x for x in drive.split("\\") if x]
         return parts[-1] if parts else "root"
     return drive.rstrip(":") or "root"
+
+
+def clean_root_title(name) -> str:
+    """사용자가 적은 최상위 폴더 이름: 제어 글자는 빈칸, 깨진 반쪽 글자(짝 없는 서로게이트)는 빼고 앞뒤 빈칸을 자른다.
+    깨진 글자는 화면 응답·설정 저장(UTF-8)에서 오류를 내고, 제어 글자는 보이지 않아 사용자가 고칠 수 없어서다."""
+    out = []
+    for ch in str(name or ""):
+        cat = unicodedata.category(ch)
+        if cat == "Cs":
+            continue
+        out.append(" " if cat == "Cc" else ch)
+    return unicodedata.normalize("NFC", "".join(out).strip())
 
 
 def album_title(key: str, root_name: str, include_root: bool) -> str:
@@ -212,13 +225,15 @@ def _skip_dir(name: str, attrs: int) -> bool:
 
 
 def scan(root, include_root=False, include_videos=True, progress=None, stop=None, *,
-         photo_max=PHOTO_MAX, video_max=VIDEO_MAX, album_max=ALBUM_MAX, title_max=TITLE_MAX,
-         resumable_min=RESUMABLE_MIN, max_examples=300) -> ScanResult:
+         root_title="", photo_max=PHOTO_MAX, video_max=VIDEO_MAX, album_max=ALBUM_MAX,
+         title_max=TITLE_MAX, resumable_min=RESUMABLE_MIN, max_examples=300) -> ScanResult:
+    """root_title: 앨범 이름에 쓸 최상위 폴더 이름. 비우면 폴더 이름(root_label)을 쓴다."""
     t0 = time.monotonic()
     root = normalize_root(root)
     if not os.path.isdir(long_path(root)):
         raise ScanError("폴더를 찾을 수 없습니다: " + root)
     rname = root_label(root)
+    tname = clean_root_title(root_title) or rname
     groups: dict[str, list[MediaFile]] = {}
     skipped: dict[str, int] = {}
     skipped_ext: dict[str, int] = {}
@@ -328,7 +343,7 @@ def scan(root, include_root=False, include_videos=True, progress=None, stop=None
     tot_files = tot_photos = tot_bytes = tot_req = 0
     for k in keys:
         fl = groups[k]
-        base = album_title(k, rname, include_root)
+        base = album_title(k, tname, include_root)
         warnings = []
         title = fit_title(base, "", title_max)
         if title != base:
