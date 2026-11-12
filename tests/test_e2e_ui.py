@@ -3,6 +3,7 @@
 GPHOTO_SHOTS=폴더 를 주면 그 폴더에 화면을 찍어 둔다. GPHOTO_HOLD=초 를 주면 끝난 뒤 그만큼 서버를 띄워 둔다(mockshot 점검용).
 """
 import os
+import re
 import sys
 import tempfile
 import time
@@ -113,65 +114,185 @@ class E2ETest(unittest.TestCase):
             page.on("pageerror", lambda e: errors.append(str(e)))
             page.goto(self.srv.url)
             expect(page.locator("#accountText")).to_have_text("tester@example.com")
-            page.screenshot(path=str(self.shots / "01_start.png"), full_page=True)
+            title = page.locator("#stepTitle")
+            nav = lambda n: page.locator(f".nav-item[data-step='{n}']")  # noqa: E731
+            # 로그인돼 있고 폴더가 없으면 2단계에서 열고, 다른 단계는 숨긴다
+            expect(title).to_have_text("사진 폴더")
+            expect(page.locator("#page1")).to_be_hidden()
+            expect(nav(1)).to_have_class(re.compile(r"\bdone\b"))
 
+            # 1단계: 열쇠가 있으면 만드는 법은 접어 두고 버튼으로 연다
+            nav(1).click()
+            expect(page.locator("#tileLogin")).to_contain_text("tester@example.com")
+            expect(page.locator("#guide")).to_be_hidden()
+            page.click("#btnGuide")
+            expect(page.locator("#guide")).to_be_visible()
+            page.screenshot(path=str(self.shots / "01_account.png"), animations="disabled")
+            page.click("#btnNext")
+            expect(title).to_have_text("사진 폴더")
+
+            # 2단계: 폴더 → 미리보기 만들기 → 다 되면 3단계로 넘어간다
             page.fill("#rootInput", str(self.root))
             page.press("#rootInput", "Enter")
             expect(page.locator("#example")).to_contain_text("사진")
+            expect(page.locator("#btnScan")).to_be_enabled()
+            page.screenshot(path=str(self.shots / "02_folder.png"), animations="disabled")
             page.click("#btnScan")
-            expect(page.locator("#albumBody tr")).to_have_count(6, timeout=15000)
+            expect(title).to_have_text("앨범 고르기", timeout=15000)
+            expect(page.locator("#albumBody tr")).to_have_count(6)
             expect(page.locator("#stats")).to_contain_text("앨범")
-            expect(page.locator("#skipped")).to_contain_text(".psd")
             expect(page.locator("#albumBody")).to_contain_text("2024_봄 (2)")
-            expect(page.locator("#uploadHint")).to_contain_text("1~2개")
-            page.screenshot(path=str(self.shots / "02_preview.png"), full_page=True)
+            expect(page.locator("#footHint")).to_contain_text("1~2개")
+            expect(page.locator("#btnUpload")).to_be_disabled()
+            page.screenshot(path=str(self.shots / "03_albums.png"), animations="disabled")
+            page.click("#btnSkipped")
+            expect(page.locator("#skBody")).to_contain_text(".psd")
+            page.screenshot(path=str(self.shots / "03b_skipped.png"), animations="disabled")
+            page.keyboard.press("Escape")
+            expect(page.locator("#skipModal")).to_be_hidden()
 
-            # 앨범 이름 옵션: 최상위 폴더 이름 넣기 → 미리보기가 낡았다고 알림 → 다시 만들기
+            # 거르기: 글자로 찾으면 '모두 선택'은 보이는 행에만 걸린다
+            page.fill("#albumFilter", "2023")
+            expect(page.locator("#albumBody tr")).to_have_count(2)
+            expect(page.locator("#chkAllText")).to_have_text("보이는 2개 모두 선택")
+            page.fill("#albumFilter", "")
+            expect(page.locator("#albumBody tr")).to_have_count(6)
+
+            # 앨범 이름 옵션을 바꾸면 미리보기가 낡았다고 알리고 올리기를 막는다(Alt+←로 2단계)
+            page.evaluate("document.activeElement.blur()")
+            page.keyboard.press("Alt+ArrowLeft")
+            expect(title).to_have_text("사진 폴더")
             page.check("#optRoot")
             expect(page.locator("#scanText")).to_contain_text("다시 만드세요")
+            expect(page.locator("#btnScan")).to_be_visible()
+            nav(3).click()
+            expect(page.locator("#staleBox")).to_be_visible()
             expect(page.locator("#btnUpload")).to_be_disabled()
+            page.click("#btnPrev")
             page.uncheck("#optRoot")
-            expect(page.locator("#scanText")).to_have_text("")
+            expect(page.locator("#scanText")).not_to_contain_text("다시 만드세요")
+            page.click("#btnNext")
+            expect(page.locator("#staleBox")).to_be_hidden()
 
             row = page.locator("#albumBody tr", has_text="2023_제주여행")
             row.locator("input[type=checkbox]").click()
             expect(page.locator("#selText")).to_contain_text("선택 1개")
-            page.locator("#albumBody tr", has_text="2023_가족모임").locator("input[type=checkbox]").click()
+            page.locator("#albumBody tr", has_text="2023_가족모임").locator("td.n").first.click()  # 행 아무 곳
             expect(page.locator("#selText")).to_contain_text("선택 2개")
             page.click("#btnUpload")
             expect(page.locator("#confirmModal")).to_be_visible()
+            expect(page.locator("#cfCancel")).to_be_focused()    # Enter를 누르고 있어도 바로 시작되지 않게
             expect(page.locator("#cfBody")).to_contain_text("tester@example.com")
             expect(page.locator("#cfBody")).to_contain_text("새로 만들 앨범 2개")
-            page.screenshot(path=str(self.shots / "03_confirm.png"))
+            page.screenshot(path=str(self.shots / "04_confirm.png"), animations="disabled")
             page.click("#cfStart")
+            expect(title).to_have_text("올리기")
             expect(page.locator("#progTitle")).to_have_text("다 올렸습니다", timeout=30000)
-            expect(row).to_contain_text("일부 3/4")           # bad_0003 은 가짜 서버가 실패로 돌려준다
-            expect(row).to_contain_text("실패 1")
-            expect(page.locator("#albumBody tr", has_text="2023_가족모임")).to_contain_text("올림 완료")
             expect(page.locator("#progMsg")).to_contain_text("실패 1개")
-            page.screenshot(path=str(self.shots / "04_done.png"), full_page=True)
+            prog = page.locator("#albumProg .row", has_text="2023_제주여행")
+            expect(prog).to_contain_text("3/4")              # bad_0003 은 가짜 서버가 실패로 돌려준다
+            expect(prog).to_contain_text("일부 실패")
+            expect(page.locator("#albumProg .row", has_text="2023_가족모임")).to_contain_text("완료")
+            expect(page.locator("#btnOpenPhotos")).to_be_visible()     # 남은 실패는 다시 해도 안 될 것뿐
+            expect(page.locator("#btnResume")).to_be_hidden()
+            page.screenshot(path=str(self.shots / "05_done.png"), animations="disabled")
 
             page.click("#btnFailures")
             expect(page.locator("#fmBody")).to_contain_text("bad_0003.JPG")
-            page.screenshot(path=str(self.shots / "05_failures.png"))
-            page.click("#fmClose")
+            page.screenshot(path=str(self.shots / "06_failures.png"), animations="disabled")
+            page.click("#fmRetry")                           # 다시 해도 안 될 실패도 다시 시도하게
+            expect(page.locator("#btnResume")).to_have_text("실패한 1개 다시 올리기")
+            expect(page.locator("#btnOpenPhotos")).to_be_visible()
+            expect(page.locator("#btnOpenPhotos")).not_to_have_class(re.compile(r"\bprimary\b"))
+            page.click("#btnResume")
+            expect(page.locator("#cfTitle")).to_have_text("이어서 올릴까요?")
+            expect(page.locator("#cfBody")).to_contain_text("남은 파일")
+            page.click("#cfCancel")
 
             page.evaluate("window.app.askClose()")
             expect(page.locator("#closeModal")).to_be_visible()
-            page.screenshot(path=str(self.shots / "06_close.png"))
+            page.screenshot(path=str(self.shots / "07_close.png"), animations="disabled")
             page.click("#clKeep")
 
-            page.click("#btnGuide")
-            expect(page.locator("#guide")).to_be_visible()
+            nav(3).click()
+            expect(row).to_contain_text("일부 3/4")
+            expect(row).to_contain_text("실패 1")
+            expect(page.locator("#albumBody tr", has_text="2023_가족모임")).to_contain_text("올림 완료")
+            page.screenshot(path=str(self.shots / "08_albums_after.png"), animations="disabled")
             page.emulate_media(color_scheme="dark")
-            page.screenshot(path=str(self.shots / "07_dark_guide.png"), full_page=True)
+            page.screenshot(path=str(self.shots / "09_dark_albums.png"), animations="disabled")
+            nav(4).click()
+            page.screenshot(path=str(self.shots / "09_dark_upload.png"), animations="disabled")
             page.emulate_media(color_scheme="light")
-            page.set_viewport_size({"width": 900, "height": 700})
-            page.screenshot(path=str(self.shots / "08_narrow.png"), full_page=True)
+            page.set_viewport_size({"width": 900, "height": 640})   # 창 최소 크기
+            for n in (1, 2, 3, 4):
+                nav(n).click()
+                page.screenshot(path=str(self.shots / f"10_narrow_{n}.png"), animations="disabled")
 
             self.assertEqual(sorted(a["title"] for a in self.fake.albums.values()),
                              ["2023_가족모임", "2023_제주여행"])
             self.assertEqual(self.fake.count("resumable_start"), 1)
+            self.assertEqual(errors, [])
+            b.close()
+
+    def test_3_wait_stop_resume(self):
+        """하루 한도로 기다리는 중 → 다른 단계의 작은 진행 버튼 → 멈추기 → 이어 올리기."""
+        from playwright.sync_api import expect, sync_playwright
+        ctl = self.ctl
+        ctl.set_root(str(self.root))
+        if ctl.plan is None or ctl._plan_stale():
+            ctl.scan()
+            for _ in range(150):
+                if ctl.scan_state["phase"] != "scanning":
+                    break
+                time.sleep(0.1)
+        ctl.select(all=False)
+        ctl.select(keys=["스캔"], on=True)
+        self.fake.add_fault("daily", "upload", times=1)
+        with sync_playwright() as pw:
+            b = pw.chromium.launch()
+            page = b.new_page(viewport={"width": 1120, "height": 860})
+            errors = []
+            page.on("pageerror", lambda e: errors.append(str(e)))
+            page.goto(self.srv.url + "#step=3")
+            title = page.locator("#stepTitle")
+            expect(title).to_have_text("앨범 고르기")
+            expect(page.locator("#selText")).to_contain_text("선택 1개")
+            # 키보드로 체크해도 표를 다시 그린 뒤 초점이 그 체크 칸에 남는다
+            spring = page.locator("#albumBody tr", has_text="2024_봄").first.locator("input[type=checkbox]")
+            spring.focus()
+            page.keyboard.press("Space")
+            expect(page.locator("#selText")).to_contain_text("선택 2개")
+            expect(spring).to_be_focused()
+            page.keyboard.press("Space")
+            expect(page.locator("#selText")).to_contain_text("선택 1개")
+            expect(spring).to_be_focused()
+            page.click("#btnUpload")
+            page.click("#cfStart")
+            expect(title).to_have_text("올리기")
+            expect(page.locator("#progTitle")).to_have_text("기다리는 중", timeout=10000)
+            expect(page.locator("#waitBox")).to_contain_text("하루 호출 한도")
+            expect(page.locator("#btnStop")).to_be_enabled()
+            page.screenshot(path=str(self.shots / "11_waiting.png"), animations="disabled")
+            page.locator(".nav-item[data-step='3']").click()
+            expect(page.locator("#miniProg")).to_contain_text("기다리는 중")
+            expect(page.locator("#albumBody input[type=checkbox]").first).to_be_disabled()   # 올리는 중엔 선택 잠금
+            page.screenshot(path=str(self.shots / "12_mini_progress.png"), animations="disabled")
+            page.click("#miniProg")
+            expect(title).to_have_text("올리기")
+            page.click("#btnStop")
+            expect(page.locator("#progTitle")).to_have_text("멈춤", timeout=10000)
+            expect(page.locator("#btnResume")).to_have_text("이어 올리기")
+            expect(page.locator("#btnResume")).to_be_enabled()
+            page.screenshot(path=str(self.shots / "13_stopped.png"), animations="disabled")
+            page.click("#btnResume")
+            expect(page.locator("#cfTitle")).to_have_text("이어서 올릴까요?")
+            page.click("#cfStart")
+            expect(page.locator("#progTitle")).to_have_text("다 올렸습니다", timeout=30000)
+            expect(page.locator("#albumProg .row", has_text="스캔")).to_contain_text("완료")
+            page.locator(".nav-item[data-step='3']").click()
+            expect(page.locator("#albumBody input[type=checkbox]").first).to_be_enabled()    # 끝나면 선택 잠금이 풀린다
+            self.assertIn("스캔", [a["title"] for a in self.fake.albums.values()])
             self.assertEqual(errors, [])
             b.close()
 

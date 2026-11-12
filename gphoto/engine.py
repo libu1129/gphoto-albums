@@ -141,7 +141,7 @@ class Engine:
             self.log(msg)
         except StopRequested:
             p.update(phase="stopped", finished=time.time(), current="",
-                     message="멈췄습니다. 다시 '올리기'를 누르면 이어서 올립니다.")
+                     message="멈췄습니다. '이어 올리기'를 누르면 이어서 올립니다.")
             self.log("멈춤")
         except AuthError as e:
             p.update(phase="error", finished=time.time(), current="", message=str(e))
@@ -193,7 +193,7 @@ class Engine:
         p = self.p
         albums = self.store.albums_for_folder(self.account, self.root, fp.key)
         if any(a["missing"] for a in albums):
-            self.log(f"'{fp.title}' 앨범이 구글 포토에서 지워져 건너뜁니다. 다시 올리려면 표에서 '다시 만들기'를 누르세요.")
+            self.log(f"'{fp.title}' 앨범이 구글 포토에서 지워져 건너뜁니다. 다시 올리려면 '앨범 고르기' 표에서 '다시 만들기'를 누르세요.")
             self._skip_rest(fp, pending, "missing")
             return
         p.set_folder(fp.key, "uploading")
@@ -260,7 +260,7 @@ class Engine:
                     if exists is False:
                         self.store.mark_album_missing(cur["album_id"])
                         self.log(f"'{cur['title']}' 앨범이 구글 포토에서 지워진 것으로 보여 이 폴더를 건너뜁니다. "
-                                 "다시 올리려면 표에서 '다시 만들기'를 누르세요.")
+                                 "다시 올리려면 '앨범 고르기' 표에서 '다시 만들기'를 누르세요.")
                         p.add(files_skipped=len(tokens))   # 바이트는 이미 보냈으니 전체 용량은 그대로
                         self._skip_rest(fp, pending[i:], "missing")
                         return

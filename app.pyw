@@ -63,7 +63,7 @@ def _selftest(window, out_path, log):
     time.sleep(2.5)
     try:
         res = window.evaluate_js(
-            "JSON.stringify({title: document.title, cards: document.querySelectorAll('section.card').length,"
+            "JSON.stringify({title: document.title, pages: document.querySelectorAll('section.page').length,"
             " account: document.getElementById('accountText').textContent,"
             " offline: !document.getElementById('offline').classList.contains('hidden'),"
             " version: document.getElementById('footVersion').textContent})")
