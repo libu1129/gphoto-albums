@@ -1,0 +1,13 @@
+# 가상환경·캐시
+.venv/
+__pycache__/
+*.pyc
+
+# 시험 산출물
+tests/_shots/
+tests/_mockshot/
+
+# 개인 사진 폴더 검토 결과(사진 목록·폴더 이름이 들어 있어 올리지 않는다)
+docs/review-*/
+
+*.log

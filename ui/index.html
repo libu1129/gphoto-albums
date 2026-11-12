@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>구글 포토 폴더 앨범 올리기</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="offline hidden" id="offline">프로그램과 연결이 끊겼습니다. 창을 닫고 다시 실행해 주세요.</div>
+
+<header class="topbar">
+  <div class="brand">
+    <svg class="logo" viewBox="0 0 48 48" aria-hidden="true">
+      <rect x="2" y="2" width="44" height="44" rx="11" fill="var(--accent)"/>
+      <path d="M11 17.5c0-1.9 1.6-3.5 3.5-3.5h6l3 3h10c1.9 0 3.5 1.6 3.5 3.5V31c0 1.9-1.6 3.5-3.5 3.5h-19c-1.9 0-3.5-1.6-3.5-3.5z" fill="#fff"/>
+      <path d="M15.5 31l5.2-6.4 3.6 4.2 2.9-3.4 4.8 5.6z" fill="var(--accent)"/>
+      <circle cx="29.5" cy="22" r="2.1" fill="var(--accent)"/>
+    </svg>
+    <div>
+      <h1>구글 포토 폴더 앨범 올리기</h1>
+      <p class="sub">폴더마다 앨범을 만들어 사진·영상을 올립니다. 앨범 이름은 폴더 경로를 <b>_</b>로 이은 것입니다.</p>
+    </div>
+  </div>
+  <div class="chip" id="accountChip"><span class="dot"></span><span id="accountText">로그인 안 됨</span></div>
+</header>
+
+<main>
+  <section class="card" id="stepAccount">
+    <div class="card-head"><span class="num">1</span><h2>구글 계정 연결</h2><span class="badge hidden" id="accountBadge">연결됨</span></div>
+    <div class="row">
+      <div class="label">열쇠 파일</div>
+      <div class="value" id="clientText">아직 없음</div>
+      <div class="actions">
+        <button id="btnClient">열쇠 파일 선택</button>
+        <button class="ghost" id="btnGuide" aria-expanded="false">만드는 법</button>
+      </div>
+    </div>
+    <div class="guide hidden" id="guide">
+      <p class="guide-lead">처음 한 번만 하면 됩니다(10분쯤). 구글 클라우드 콘솔에서 이 프로그램이 쓸 열쇠를 만듭니다. 각 단계의 <b>열기</b>를 누르면 브라우저에서 그 화면이 열립니다.</p>
+      <ol class="steps">
+        <li><span>새 프로젝트를 만듭니다. 이름은 아무거나(예: 사진 올리기).</span><button class="small" data-guide="project">열기</button></li>
+        <li><span><b>Photos Library API</b>를 찾아 <b>사용</b>을 누릅니다.</span><button class="small" data-guide="library">열기</button></li>
+        <li><span>Google 인증 플랫폼에서 <b>시작하기</b> → 앱 이름·내 이메일을 넣고 대상은 <b>외부</b>로 고릅니다.</span><button class="small" data-guide="branding">열기</button></li>
+        <li><span><b>대상</b> → <b>테스트 사용자</b>에 사진을 올릴 내 구글 계정 이메일을 추가합니다.</span><button class="small" data-guide="audience">열기</button></li>
+        <li><span><b>클라이언트</b> → <b>클라이언트 만들기</b> → 유형 <b>데스크톱 앱</b> → 만들기 → <b>JSON 다운로드</b>.</span><button class="small" data-guide="clients">열기</button></li>
+        <li><span>받은 <code>client_secret_….json</code> 파일을 위의 <b>열쇠 파일 선택</b>으로 고릅니다.</span></li>
+      </ol>
+      <p class="note">로그인할 때 '확인되지 않은 앱' 경고가 나오면, 직접 만든 앱이라 그런 것이니 <b>계속</b>을 누르세요. 권한 체크 칸은 모두 체크하세요. 시험 상태 앱이라 7일마다 다시 로그인해야 합니다.</p>
+    </div>
+    <div class="row">
+      <div class="label">로그인</div>
+      <div class="value" id="loginText">로그인 안 됨</div>
+      <div class="actions">
+        <button class="primary" id="btnLogin">구글 로그인</button>
+        <button class="ghost hidden" id="btnLoginCancel">취소</button>
+        <button class="ghost hidden" id="btnLogout">로그아웃</button>
+      </div>
+    </div>
+    <p class="note hidden" id="loginNote"></p>
+  </section>
+
+  <section class="card" id="stepFolder">
+    <div class="card-head"><span class="num">2</span><h2>사진 폴더와 앨범 이름</h2></div>
+    <div class="row">
+      <label class="label" for="rootInput">최상위 폴더</label>
+      <input id="rootInput" class="path" placeholder="예: D:\사진  또는  \\NAS\photo" spellcheck="false" autocomplete="off">
+      <div class="actions"><button id="btnRoot">폴더 선택</button></div>
+    </div>
+    <div class="options">
+      <label class="check"><input type="checkbox" id="optRoot"> 앨범 이름 앞에 최상위 폴더 이름도 넣기</label>
+      <label class="check"><input type="checkbox" id="optVideo"> 영상도 올리기</label>
+    </div>
+    <div class="example" id="example"></div>
+    <div class="row-end">
+      <span class="muted" id="scanText"></span>
+      <button class="primary" id="btnScan">미리보기 만들기</button>
+    </div>
+  </section>
+
+  <section class="card" id="stepPreview">
+    <div class="card-head"><span class="num">3</span><h2>미리보기와 올리기</h2></div>
+    <div class="empty" id="previewEmpty">폴더를 고르고 <b>미리보기 만들기</b>를 누르면 만들 앨범이 여기에 나옵니다. 이 단계에서는 아무것도 올라가지 않습니다.</div>
+    <div class="hidden" id="previewBody">
+      <div class="stats" id="stats"></div>
+      <div class="skipped" id="skipped"></div>
+      <div class="toolbar">
+        <label class="check"><input type="checkbox" id="chkAll"> 모두 선택</label>
+        <span class="muted" id="selText"></span>
+        <span class="spacer"></span>
+        <button class="primary" id="btnUpload">선택한 앨범 올리기</button>
+      </div>
+      <p class="hint" id="uploadHint"></p>
+      <div class="table-wrap" id="tableWrap">
+        <table id="albumTable">
+          <colgroup><col class="c-chk"><col><col class="c-n"><col class="c-n"><col class="c-size"><col class="c-st"></colgroup>
+          <thead><tr><th></th><th>앨범 이름 · 폴더</th><th class="n">사진</th><th class="n">영상</th><th class="n">용량</th><th>상태</th></tr></thead>
+          <tbody id="albumBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section class="card hidden" id="progressCard">
+    <div class="card-head">
+      <h2 id="progTitle">올리는 중</h2>
+      <span class="spacer"></span>
+      <button class="ghost hidden" id="btnFailures">실패 목록</button>
+      <button class="danger hidden" id="btnStop">멈추기</button>
+    </div>
+    <div class="bar"><div class="fill" id="progFill"></div></div>
+    <div class="prog-grid" id="progGrid"></div>
+    <div class="current" id="progCurrent"></div>
+    <div class="wait hidden" id="waitBox"></div>
+    <div class="msg hidden" id="progMsg"></div>
+  </section>
+
+  <details class="card log" id="logCard">
+    <summary>기록 <span class="muted" id="logCount"></span></summary>
+    <pre id="logBox"></pre>
+  </details>
+</main>
+
+<footer class="foot">
+  <span id="footVersion"></span>
+  <button class="link" id="btnData">자료 폴더 열기</button>
+  <button class="link" id="btnPhotos">구글 포토 앨범 보기</button>
+</footer>
+
+<div class="modal hidden" id="confirmModal" role="dialog" aria-modal="true" aria-labelledby="cfTitle">
+  <div class="dialog">
+    <h3 id="cfTitle">구글 포토에 올릴까요?</h3>
+    <div id="cfBody"></div>
+    <div class="dialog-actions">
+      <button id="cfCancel">취소</button>
+      <button class="primary" id="cfStart">올리기 시작</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal hidden" id="closeModal" role="dialog" aria-modal="true" aria-labelledby="clTitle">
+  <div class="dialog">
+    <h3 id="clTitle">올리는 중입니다</h3>
+    <p>창을 닫으면 올리기가 멈춥니다. 다음에 다시 실행해 <b>올리기</b>를 누르면 이어서 올립니다.</p>
+    <div class="dialog-actions">
+      <button class="primary" id="clKeep">계속 올리기</button>
+      <button class="danger" id="clQuit">멈추고 닫기</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal hidden" id="failModal" role="dialog" aria-modal="true" aria-labelledby="fmTitle">
+  <div class="dialog wide">
+    <h3 id="fmTitle">실패한 파일</h3>
+    <div class="fail-list" id="fmBody"></div>
+    <div class="dialog-actions">
+      <button class="ghost" id="fmRetry">다시 해도 안 될 실패도 다음에 다시 시도</button>
+      <button class="primary" id="fmClose">닫기</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast hidden" id="toast"></div>
+<script src="app.js"></script>
+</body>
+</html>

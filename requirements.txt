@@ -1,0 +1,21 @@
+﻿# 구글 포토 폴더 앨범 올리기 실행에 필요한 라이브러리(개발 가상환경에서 시험한 버전 그대로)
+bottle==0.13.4
+certifi==2026.10.23
+cffi==2.1.1
+charset-normalizer==3.5.2
+clr_loader==0.3.1
+cryptography==50.0.2
+google-auth==2.62.2
+google-auth-oauthlib==1.5.0
+idna==3.20
+oauthlib==4.0.1
+proxy_tools==0.1.0
+pyasn1==0.6.5
+pyasn1_modules==0.4.2
+pycparser==3.12
+pythonnet==3.2.1
+pywebview==6.2.1
+requests==2.34.2
+requests-oauthlib==2.0.0
+typing_extensions==4.16.0
+urllib3==2.8.0
