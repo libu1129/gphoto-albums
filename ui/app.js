@@ -407,7 +407,8 @@
     const failed = (it.failed || 0) + (it.failed_perm || 0);
     switch (v) {
       case 'selected': return it.selected;
-      case 'new': return !it.done && !(it.album_titles && it.album_titles.length);
+      case 'new': return !it.manual && !it.done && !(it.album_titles && it.album_titles.length);
+      case 'manual': return !!it.manual;
       case 'partial': return it.done > 0 && it.done < it.files;
       case 'done': return it.files > 0 && it.done >= it.files;
       case 'failed': return failed > 0;
@@ -426,6 +427,10 @@
   }
 
   function statusHtml(it) {
+    if (it.manual) {   // 손으로 올렸다고 표시한 폴더: 앱 기록이 있으면 회색으로 함께 보인다
+      const app = it.done > 0 ? `<span class="muted">앱 ${num(it.done)}/${num(it.files)}</span>` : '';
+      return `<div class="st"><span class="pill">직접 올림</span>${app}<button class="link" data-act="unmark" data-key="${esc(it.key)}">표시 풀기</button></div>`;
+    }
     const out = [];
     if (it.live === 'uploading') out.push(`<span class="pill run">올리는 중</span><span class="muted">${num(it.done)}/${num(it.files)}</span>`);
     else if (it.live === 'queued') out.push('<span class="pill">대기</span>');
@@ -453,7 +458,7 @@
       if (it.warnings && it.warnings.length) extra.push(`<div class="w">⚠ ${it.warnings.map(esc).join(' · ')}</div>`);
       if (it.album_titles && it.album_titles.length && it.album_titles[0] !== it.title) extra.push(`<div class="m">구글 앨범: ${it.album_titles.map(esc).join(', ')}</div>`);
       return `<tr class="${it.selected ? 'sel' : ''}">` +
-        `<td class="c-chk"><input type="checkbox" aria-label="${esc(it.title)} 선택" data-key="${esc(it.key)}" ${it.selected ? 'checked' : ''} ${lock ? 'disabled' : ''}></td>` +
+        `<td class="c-chk"><input type="checkbox" aria-label="${esc(it.title)} 선택" data-key="${esc(it.key)}" ${it.selected ? 'checked' : ''} ${lock || it.manual ? 'disabled' : ''}></td>` +
         `<td><div class="t">${esc(it.title)}</div><div class="p">${esc(itemPath(it, lbl))}</div>${extra.join('')}</td>` +
         `<td class="n">${num(it.photos)}</td><td class="n">${num(it.videos)}</td><td class="n">${bytes(it.bytes)}</td>` +
         `<td>${statusHtml(it)}</td></tr>`;
@@ -470,13 +475,20 @@
   function renderSelection(rows) {
     if (!S || !S.plan) return;
     rows = rows || visibleItems();
-    const nVisSel = rows.filter((it) => it.selected).length;
+    const pick = rows.filter((it) => !it.manual);   // '직접 올림' 줄은 고를 수 없으니 모두 선택 기준에서 뺀다
+    const nVisSel = pick.filter((it) => it.selected).length;
     const all = $('chkAll');
-    all.checked = rows.length > 0 && nVisSel === rows.length;
-    all.indeterminate = nVisSel > 0 && nVisSel < rows.length;
-    all.disabled = S.uploading || rows.length === 0;
-    $('chkAllText').textContent = isFiltered() ? `보이는 ${num(rows.length)}개 모두 선택` : '모두 선택';
+    all.checked = pick.length > 0 && nVisSel === pick.length;
+    all.indeterminate = nVisSel > 0 && nVisSel < pick.length;
+    all.disabled = S.uploading || pick.length === 0;
+    $('chkAllText').textContent = isFiltered() && pick.length ? `보이는 ${num(pick.length)}개 모두 선택` : '모두 선택';
     const sel = S.selection;
+    // 로그인 전에는 '직접 올림' 표시를 모르니 버튼 대신 안내 한 줄을 보인다
+    const known = A.marks_known !== false;
+    const mb = $('btnManual');
+    show(mb, known);
+    mb.disabled = S.uploading || !sel.count || !S.account.logged_in;
+    show($('manualHint'), !known && A.items.length > 0);
     const hidden = Math.max(0, A.items.filter((it) => it.selected).length - nVisSel);
     $('selText').textContent = sel.count
       ? `선택 ${num(sel.count)}개${hidden ? `(안 보이는 ${num(hidden)}개 포함)` : ''} · 파일 ${num(sel.files)}개 · ${bytes(sel.bytes)}`
@@ -563,8 +575,8 @@
 
   // ── 아래 막대: 단계마다 주 버튼과 못 누르는 까닭 ──
   const FOOT_BUTTONS = ['btnRescan', 'btnFailures', 'btnStop', 'btnResume', 'btnOpenPhotos', 'btnScan', 'btnUpload', 'btnNext'];
-  function retryableFailed() {
-    return A.items.filter((it) => it.live != null).reduce((n, it) => n + (it.failed || 0), 0);
+  function retryableFailed() {   // '직접 올림'으로 표시한 폴더는 다시 올리지 않으니 세지 않는다
+    return A.items.filter((it) => it.live != null && !it.manual).reduce((n, it) => n + (it.failed || 0), 0);
   }
   function renderFooter() {
     if (!S) return;
@@ -646,7 +658,7 @@
   }
 
   // ── 창(모달) ──
-  const MODALS = ['confirmModal', 'failModal', 'skipModal', 'closeModal'];
+  const MODALS = ['confirmModal', 'failModal', 'skipModal', 'closeModal', 'markModal'];
   let lastFocus = null;
   const modalOpen = () => MODALS.some((id) => !$(id).classList.contains('hidden'));
   function openModal(id, focusId) {
@@ -679,10 +691,37 @@
       '<li>이 프로그램으로는 올린 사진·앨범을 지울 수 없습니다. 잘못 올렸으면 구글 포토에서 직접 지워야 합니다.</li>' +
       '<li>올리는 동안 PC가 절전에 들지 않게 합니다. 창을 닫으면 멈추고, 다음에 이어서 올립니다.</li></ul>';
     if (c.skipped_perm) html += `<p class="note">다시 해도 안 될 실패로 본 ${num(c.skipped_perm)}개는 빼고 올립니다.</p>`;
+    if (c.manual_excluded) html += `<p class="note">직접 올림으로 표시한 앨범 ${num(c.manual_excluded)}개는 빼고 올립니다.</p>`;
     $('cfBody').innerHTML = html;
     $('cfStart').disabled = !c.files;
     // 올린 것은 이 프로그램으로 못 지우니, Enter를 누르고 있다가 바로 시작되지 않게 초점은 '취소'에 둔다
     openModal('confirmModal', 'cfCancel');
+  }
+
+  // 손으로 이미 올린 폴더 표시: 지금 고른 앨범을 확인받고 표시한다(초점은 '취소')
+  let markKeys = [];
+  function openMark() {
+    if (!S || !A) return;
+    const items = A.items.filter((it) => it.selected);
+    if (!items.length) return;
+    markKeys = items.map((it) => it.key);
+    // 거르기로 안 보이는 선택도 함께 표시된다(아래 막대의 '안 보이는 N개 포함'과 같은 기준). 잘못 누르면 줄마다 풀어야 하니 미리 알린다
+    const vis = new Set(visibleItems().map((it) => it.key));
+    const hiddenN = items.filter((it) => !vis.has(it.key)).length;
+    const names = items.slice(0, 10).map((it) => `<li>${esc(it.title)}</li>`).join('') +
+      (items.length > 10 ? `<li class="muted">외 ${num(items.length - 10)}개</li>` : '');
+    let html = `<p>구글 포토에 손으로 이미 올린 폴더로 표시합니다. 표시한 ${num(items.length)}개는 이 프로그램이 올리지 않고, ` +
+      `다시 열거나 '모두 선택'을 눌러도 빠집니다. 표의 '표시 풀기'로 언제든 되돌릴 수 있습니다.</p><ul>${names}</ul>`;
+    if (hiddenN) html += `<p class="note warn">지금 표에 안 보이는 선택 ${num(hiddenN)}개도 함께 표시됩니다. 손으로 올린 것만 표시하려면 취소하고 선택을 다시 확인하세요.</p>`;
+    const partial = items.filter((it) => it.done > 0 && it.done < it.files);
+    if (partial.length) {
+      const lines = partial.slice(0, 5).map((it) => `'${esc(it.title)}'는 이 프로그램이 이미 ${num(it.done)}/${num(it.files)}개를 올렸습니다. 표시하면 남은 ${num(it.files - it.done)}개는 올라가지 않습니다.`);
+      if (partial.length > 5) lines.push(`그 밖에 이미 일부 올린 앨범 ${num(partial.length - 5)}개`);
+      html += `<p class="note warn">${lines.join('<br>')}</p>`;
+    }
+    $('mkBody').innerHTML = html;
+    $('mkOk').textContent = `${num(items.length)}개 표시하기`;
+    openModal('markModal', 'mkCancel');
   }
 
   function openSkipped() {
@@ -802,6 +841,7 @@
     if (!b) return false;
     if (b.dataset.act === 'open') act('open', { what: 'album', key: b.dataset.key });
     if (b.dataset.act === 'forget') act('forget_album', { key: b.dataset.key }, '다음에 올릴 때 앨범을 새로 만듭니다');
+    if (b.dataset.act === 'unmark') act('manual', { keys: [b.dataset.key], on: false }, "표시를 풀었습니다. 올리려면 다시 고르세요");
     return true;
   }
   $('albumBody').addEventListener('click', (e) => {
@@ -812,6 +852,14 @@
   });
   $('albumProg').addEventListener('click', rowAction);
   $('btnSkipped').addEventListener('click', openSkipped);
+  $('btnManual').addEventListener('click', openMark);
+  $('mkCancel').addEventListener('click', () => closeModal('markModal'));
+  $('mkOk').addEventListener('click', async () => {
+    const keys = markKeys;
+    markKeys = [];
+    closeModal('markModal');
+    if (keys.length) await act('manual', { keys, on: true }, `${keys.length}개를 직접 올림으로 표시했습니다`);
+  });
   $('skClose').addEventListener('click', () => closeModal('skipModal'));
 
   $('btnUpload').addEventListener('click', () => openConfirm('start'));

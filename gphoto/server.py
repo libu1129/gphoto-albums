@@ -42,6 +42,7 @@ def _routes():
                                                    p.get("root_title")),
         "/api/scan": lambda c, p: c.scan(),
         "/api/select": lambda c, p: c.select(p.get("keys"), p.get("on", True), p.get("all")),
+        "/api/manual": lambda c, p: c.mark_manual(p.get("keys"), p.get("on", True)),
         "/api/start": lambda c, p: c.start(),
         "/api/stop": lambda c, p: c.stop(),
         "/api/forget_album": lambda c, p: c.forget_album(p.get("key", "")),

@@ -72,6 +72,8 @@ class Controller:
         self.plan_version = 0
         self.plan_settings = None
         self.selected: set[str] = set()
+        # '직접 올림' 표시 캐시: (구글 계정, normcase(최상위)) → 폴더 키 묶음. 쓰는 곳은 mark_manual뿐이라 폴링마다 DB를 읽지 않는다
+        self._manual_cache: dict[tuple, frozenset] = {}
         self.progress = Progress()
         self.login_state = {"phase": "idle", "error": None}
         self._log = deque(maxlen=600)
@@ -120,6 +122,24 @@ class Controller:
         who = acc.get("sub") or acc.get("email") or "unknown"
         return f"{who}|{self.auth.client_info().get('client_id') or ''}"
 
+    @staticmethod
+    def _google_id(acc):
+        """'직접 올림' 표시의 계정 열쇠. 열쇠 파일(client)은 넣지 않는다: 손으로 올린 것은 구글 계정에 속한다."""
+        acc = acc or {}
+        return acc.get("sub") or acc.get("email") or None
+
+    def _manual_keys(self, acc, plan) -> frozenset:
+        """지금 계정·최상위 폴더에서 '직접 올림'으로 표시한 폴더 키. 로그인 전이거나 미리보기가 없으면 빈 묶음."""
+        gid = self._google_id(acc)
+        if not gid or plan is None:
+            return frozenset()
+        ck = (gid, os.path.normcase(plan.root))
+        got = self._manual_cache.get(ck)
+        if got is None:
+            # 읽는 사이 mark_manual이 새 값을 넣었으면 그것을 지킨다(옛 값으로 덮어쓰지 않는다)
+            got = self._manual_cache.setdefault(ck, frozenset(self.store.manual_folders(*ck)))
+        return got
+
     def uploading(self) -> bool:
         return bool(self._upload_thread and self._upload_thread.is_alive())
 
@@ -156,6 +176,7 @@ class Controller:
     def snapshot(self) -> dict:
         self.last_seen = time.time()
         acc = self.auth.account()
+        manual = self._manual_keys(acc, self.plan)   # 잠금 밖에서(처음 한 번만 DB를 읽는다)
         with self._lock:
             plan = self.plan
             plan_info = None
@@ -170,15 +191,16 @@ class Controller:
                     errors=plan.errors[:30], n_errors=len(plan.errors), stale=self._plan_stale(),
                     elapsed=round(plan.elapsed, 1))
             sel_files = sel_bytes = 0
+            eff = self.selected - manual   # 다른 계정으로 바꿔 로그인한 경우 등, 표시한 폴더는 선택에서 늘 뺀다
             if plan is not None:
                 for fp in plan.folders:
-                    if fp.key in self.selected:
+                    if fp.key in eff:
                         sel_files += len(fp.files)
                         sel_bytes += fp.bytes
             settings = self._public_settings()
             lines = list(self._log)[-200:]
             log_seq = self._log_seq
-            n_selected = len(self.selected)
+            n_selected = len(eff)
         return dict(
             version=__version__, data_dir=str(self.data), client=self.auth.client_info(),
             account=dict(email=(acc or {}).get("email"), logged_in=bool(acc),
@@ -195,7 +217,9 @@ class Controller:
             plan = self.plan
             selected = set(self.selected)
         if plan is None:
-            return dict(version=0, items=[])
+            return dict(version=0, items=[], marks_known=False)
+        manual = self._manual_keys(self.auth.account(), plan)
+        marks_known = self._google_id(self.auth.account()) is not None   # 로그인 전이면 '직접 올림' 표시를 모른다
         acc = self._account_key()
         status = self.store.folder_status(acc, plan.root) if acc else {}
         live = self.progress.folder_status_copy()
@@ -212,8 +236,9 @@ class Controller:
                 missing=any(a["missing"] for a in albums),
                 album_url=next((a["url"] for a in albums if a.get("url")), None),
                 album_titles=[a["title"] for a in albums],
-                live=live.get(fp.key), selected=fp.key in selected))
-        return dict(version=self.plan_version, items=items)
+                live=live.get(fp.key), manual=fp.key in manual,
+                selected=fp.key in selected and fp.key not in manual))
+        return dict(version=self.plan_version, items=items, marks_known=marks_known)
 
     def confirm_info(self) -> dict:
         with self._lock:
@@ -222,6 +247,8 @@ class Controller:
         if plan is None:
             raise UserError("미리보기를 먼저 만드세요.")
         acc = self.auth.account()
+        manual = self._manual_keys(acc, plan)
+        selected -= manual
         key = self._account_key()
         pending_files = pending_bytes = new_albums = req = perm = 0
         for fp in plan.folders:
@@ -249,7 +276,8 @@ class Controller:
                     files=pending_files, bytes=pending_bytes, bytes_text=fmt_bytes(pending_bytes),
                     new_albums=new_albums, est_requests=req,
                     est_days=max(1, math.ceil(req / DAILY_QUOTA)) if req else 0,
-                    skipped_perm=perm)
+                    skipped_perm=perm,
+                    manual_excluded=sum(1 for fp in plan.folders if fp.key in manual))
 
     # ── 열쇠 파일·로그인 ──
     def _dialog(self, kind, **kw):
@@ -463,17 +491,54 @@ class Controller:
         return True
 
     def select(self, keys=None, on=True, all=None):  # noqa: A002 - 화면 API 이름
+        manual = self._manual_keys(self.auth.account(), self.plan)   # '직접 올림' 폴더는 고를 수 없다
         with self._lock:
             if self.plan is None:
                 return 0
             if all is not None:
-                self.selected = {fp.key for fp in self.plan.folders} if all else set()
+                self.selected = {fp.key for fp in self.plan.folders if fp.key not in manual} if all else set()
             else:
-                valid = {fp.key for fp in self.plan.folders}
+                valid = {fp.key for fp in self.plan.folders} - (manual if on else frozenset())
                 for k in keys or []:
                     if k in valid:
                         (self.selected.add if on else self.selected.discard)(k)
             return len(self.selected)
+
+    def mark_manual(self, keys, on=True):
+        """구글 포토에 손으로 이미 올린 폴더를 '직접 올림'으로 표시하거나 푼다. 표시한 폴더는 고를 수도, 올릴 수도 없다.
+        올리기 시작과 겹치지 않게 start()와 같은 잠금을 잡는다(폴더 목록을 정한 뒤 스레드가 뜨기 전 틈)."""
+        if not isinstance(keys, list) or not all(isinstance(k, str) for k in keys):
+            raise UserError("폴더 목록이 잘못됐습니다.")
+        on = bool(on)
+        if not self._start_lock.acquire(blocking=False):
+            raise UserError("올리기를 시작하는 중입니다. 잠시 뒤 다시 하세요.")
+        try:
+            if self.uploading():
+                raise UserError("올리는 중에는 '직접 올림' 표시를 바꿀 수 없습니다. 먼저 멈추세요.")
+            gid = self._google_id(self.auth.account())
+            if not gid:
+                raise UserError("먼저 구글에 로그인하세요. '직접 올림' 표시는 구글 계정마다 따로 남습니다.")
+            with self._lock:
+                plan = self.plan
+                if plan is None:
+                    raise UserError("미리보기를 먼저 만드세요.")
+                valid = {fp.key for fp in plan.folders}
+                keys = [k for k in dict.fromkeys(keys) if k in valid]
+                root = os.path.normcase(plan.root)
+            self.store.set_manual(gid, root, keys, on)
+            fresh = frozenset(self.store.manual_folders(gid, root))
+            with self._lock:
+                self._manual_cache[(gid, root)] = fresh
+                if on:
+                    self.selected -= set(keys)
+            titles = {fp.key: fp.title for fp in plan.folders}
+            if keys:
+                names = ", ".join(titles[k] for k in keys[:3]) + (f" 외 {len(keys) - 3}개" if len(keys) > 3 else "")
+                self.log(f"'직접 올림' {'표시' if on else '풀기'}: {names}")
+            self.progress.bump()   # 표를 다시 받게(풀 때는 선택 수가 안 바뀐다)
+            return dict(changed=len(keys), total=len(fresh))
+        finally:
+            self._start_lock.release()
 
     # ── 올리기 ──
     def start(self):
@@ -495,7 +560,8 @@ class Controller:
             acc_key = self._account_key()
             if not acc_key:
                 raise UserError("먼저 구글에 로그인하세요.")
-            folders = [fp for fp in self.plan.folders if fp.key in self.selected]
+            manual = self._manual_keys(self.auth.account(), self.plan)
+            folders = [fp for fp in self.plan.folders if fp.key in self.selected and fp.key not in manual]
             if not folders:
                 raise UserError("올릴 앨범을 하나 이상 고르세요.")
             root = self.plan.root

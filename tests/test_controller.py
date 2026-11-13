@@ -6,6 +6,8 @@ import time
 import unittest
 from pathlib import Path
 
+import requests
+
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 sys.path.insert(0, str(HERE))
@@ -147,6 +149,162 @@ class ControllerTest(unittest.TestCase):
         self.wait_upload()
         self.assertEqual(len(self.fake.albums), 1)
         self.assertEqual(len(next(iter(self.fake.albums.values()))["items"]), 31)
+
+    def make_folder(self, name, n, start=0):
+        for i in range(start, start + n):
+            p = self.root / name / f"{i}.jpg"
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_bytes(b"m" * 500)
+
+    @staticmethod
+    def scan_ctl(ctl):
+        ctl.scan()
+        for _ in range(100):
+            if ctl.scan_state["phase"] == "done":
+                return
+            time.sleep(0.05)
+        raise AssertionError("훑기가 끝나지 않음")
+
+    def manual_of(self, ctl=None):
+        return {it["key"]: it["manual"] for it in (ctl or self.ctl).albums()["items"]}
+
+    def test_manual_folder_excluded_and_kept(self):
+        """손으로 올렸다고 표시한 폴더는 고를 수도 올릴 수도 없고, 다시 열거나 열쇠 파일을 바꿔도 남는다(구글 계정마다)."""
+        self.make_folder("손으로", 3)
+        self.ctl.set_root(str(self.root))
+        self.scan_ctl(self.ctl)
+        self.auth.logged = False
+        with self.assertRaises(UserError):
+            self.ctl.mark_manual(["손으로"], True)          # 로그인 전: 계정을 몰라 표시할 수 없다
+        self.auth.logged = True
+        with self.assertRaises(UserError):
+            self.ctl.mark_manual("손으로", True)            # 목록이 아님
+        self.ctl.select(all=True)
+        self.assertEqual(self.ctl.mark_manual(["손으로", "없는 폴더"], True), {"changed": 1, "total": 1})
+        items = {it["key"]: it for it in self.ctl.albums()["items"]}
+        self.assertTrue(items["손으로"]["manual"])
+        self.assertFalse(items["손으로"]["selected"])          # 표시하면 선택에서 빠진다
+        self.assertEqual(self.ctl.select(all=True), 1)           # 모두 선택해도 빠진다
+        self.ctl.select(keys=["손으로"], on=True)                 # 하나씩 골라도 안 들어간다
+        self.assertEqual(self.ctl.snapshot()["selection"]["count"], 1)
+        ci = self.ctl.confirm_info()
+        self.assertEqual((ci["manual_excluded"], ci["folders"], ci["files"]), (1, 1, 30))   # 표시한 3개는 세지 않는다
+        self.ctl.start()
+        self.wait_upload()
+        self.assertEqual([a["title"] for a in self.fake.albums.values()], ["앨범"])
+        # 다시 열어도, 열쇠 파일(client)을 바꿔도 같은 구글 계정이면 남는다
+        again = Controller(self.ctl.data, auth=self.auth, photos_base=self.fake.base)
+        try:
+            self.scan_ctl(again)
+            self.assertTrue(self.manual_of(again)["손으로"])
+        finally:
+            again.shutdown()
+        self.auth.client_info = lambda: {"ok": True, "project": "other", "client": "999", "client_id": "999-x"}
+        self.assertTrue(self.manual_of()["손으로"])
+        # 다른 구글 계정에는 붙지 않는다(그 계정에 손으로 올린 것이 아니다)
+        mine = self.auth.account
+        self.auth.account = lambda: {**mine(), "sub": "sub-2", "email": "other@example.com"}
+        self.assertFalse(self.manual_of()["손으로"])
+        self.auth.account = mine
+        self.assertTrue(self.manual_of()["손으로"])
+        # 로그아웃하면 표시를 모른다(고를 수는 있다). 다시 로그인하면 올리기 시작에서 다시 걸러진다
+        self.auth.logged = False
+        self.assertFalse(self.ctl.albums()["marks_known"])
+        self.assertEqual(self.ctl.select(all=True), 2)
+        self.auth.logged = True
+        self.assertEqual(self.ctl.snapshot()["selection"]["count"], 1)
+        self.ctl.start()
+        self.wait_upload()
+        self.assertNotIn("손으로", [a["title"] for a in self.fake.albums.values()])
+        # 표시를 풀면 다시 골라 올릴 수 있다
+        self.assertEqual(self.ctl.mark_manual(["손으로"], False), {"changed": 1, "total": 0})
+        self.ctl.select(keys=["손으로"], on=True)
+        self.ctl.start()
+        self.wait_upload()
+        self.assertIn("손으로", [a["title"] for a in self.fake.albums.values()])
+
+    def test_manual_on_partly_uploaded_folder(self):
+        """앱이 일부 올린 폴더도 표시할 수 있다: 남은 파일은 안 올라가고, 풀면 같은 앨범에 이어 올린다."""
+        self.scan_and_select()
+        self.ctl.start()
+        self.wait_upload()
+        self.make_folder("앨범", 5, start=30)                       # 올린 30개 옆에 5개(30~34.jpg)가 새로 생김
+        self.scan_ctl(self.ctl)
+        self.ctl.mark_manual(["앨범"], True)
+        self.ctl.select(all=True)
+        with self.assertRaises(UserError):
+            self.ctl.start()                                         # 고를 앨범이 없다
+        self.ctl.mark_manual(["앨범"], False)
+        self.ctl.select(all=True)
+        self.ctl.start()
+        self.wait_upload()
+        self.assertEqual(len(self.fake.albums), 1)
+        self.assertEqual(len(next(iter(self.fake.albums.values()))["items"]), 35)
+
+    def test_manual_marks_are_per_root(self):
+        """표시는 최상위 폴더마다 남는다: 다른 최상위의 같은 이름 폴더에는 붙지 않고, 대소문자만 다른 경로로 돌아와도 보인다."""
+        self.make_folder("손으로", 3)
+        other = Path(self.tmp.name) / "사본"
+        for i in range(2):
+            p = other / "손으로" / f"{i}.jpg"
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_bytes(b"y" * 500)
+        self.ctl.set_root(str(self.root))
+        self.scan_ctl(self.ctl)
+        self.ctl.mark_manual(["손으로"], True)
+        self.ctl.set_root(str(other))
+        self.scan_ctl(self.ctl)
+        self.assertFalse(self.manual_of()["손으로"])
+        self.ctl.set_root(str(self.root).upper())
+        self.scan_ctl(self.ctl)
+        self.assertTrue(self.manual_of()["손으로"])
+
+    def test_mark_refused_while_uploading(self):
+        """올리는 중에는 표시를 바꿀 수 없다(멈춘 뒤에 바꾼다)."""
+        gate = threading.Event()
+
+        class HeldSession(requests.Session):   # 첫 요청을 붙잡아 올리기 스레드가 도는 상태를 만든다
+            def request(self, *a, **kw):
+                gate.wait(5)
+                return super().request(*a, **kw)
+
+        self.ctl.session_factory = HeldSession
+        self.scan_and_select()
+        self.ctl.start()
+        try:
+            self.assertTrue(self.ctl.uploading())
+            with self.assertRaisesRegex(UserError, "올리는 중"):
+                self.ctl.mark_manual(["앨범"], True)
+        finally:
+            gate.set()
+        self.wait_upload()
+        self.assertFalse(self.manual_of()["앨범"])
+        self.assertEqual(self.fake.count("upload_raw"), 30)
+
+    def test_mark_blocked_while_starting(self):
+        """올리기 시작이 폴더를 정하고 스레드를 띄우기 전(세션을 만드는 중)에는 표시를 바꿀 수 없다."""
+        gate = threading.Event()
+
+        def slow_session():
+            gate.wait(5)
+            return requests.Session()
+
+        self.ctl.session_factory = slow_session
+        self.scan_and_select()
+        t = threading.Thread(target=self.ctl.start)
+        t.start()
+        for _ in range(200):
+            if self.ctl._start_lock.locked():
+                break
+            time.sleep(0.01)
+        try:
+            with self.assertRaises(UserError):
+                self.ctl.mark_manual(["앨범"], True)
+        finally:
+            gate.set()
+            t.join(5)
+        self.wait_upload()
+        self.assertEqual(self.fake.count("upload_raw"), 30)
 
     def test_choosing_key_marks_guide_until_login(self):
         """열쇠 파일을 고르면 안내 1~7단계는 끝난 것으로 남긴다(나중에 열쇠가 깨져도 처음부터 다시 뜨지 않게)."""

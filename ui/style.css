@@ -222,7 +222,12 @@ input.path.name { flex: 0 1 280px; width: 280px; }
 .stat { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); padding: 8px 14px; min-width: 0; }
 .stat b { display: block; font-size: 18px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .stat small { display: block; color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.toolbar { display: flex; align-items: center; gap: 10px; flex: none; min-width: 0; }
+/* 자리가 모자라면 칸을 찌그러뜨리지 않고 다음 줄로 넘긴다 */
+.toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; flex: none; min-width: 0; }
+.toolbar > * { flex: none; }
+.toolbar > .spacer { flex: 1; }
+.toolbar > #btnSkipped { margin-left: auto; }   /* 다음 줄로 넘어가도 오른쪽에 붙인다 */
+#manualHint { font-size: 12.5px; white-space: nowrap; }
 .toolbar .check { white-space: nowrap; }
 .toolbar .link { font-size: 13px; }
 .toolbar .link.warn { color: var(--warn); }
@@ -351,7 +356,6 @@ td.c-chk input { margin-top: 3px; }
   .g-name { display: none; }
   .g-detail { border-left: none; padding-left: 0; border-top: 1px solid var(--line); padding-top: 10px; }
   .g-scroll { overflow: visible; }
-  .toolbar { flex-wrap: wrap; }
   .toast { left: calc(50% + 30px); max-width: calc(100% - 92px); }
 }
 @media (max-height: 720px) {

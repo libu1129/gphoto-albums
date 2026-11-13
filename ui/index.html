@@ -274,9 +274,12 @@ https://www.googleapis.com/auth/userinfo.email</pre><button class="small" data-c
               <option value="new">새 앨범</option>
               <option value="partial">일부 올림</option>
               <option value="done">올림 완료</option>
+              <option value="manual">직접 올림</option>
               <option value="failed">실패 있음</option>
               <option value="warn">경고 있음</option>
             </select>
+            <button class="small" id="btnManual" disabled title="구글 포토에 손으로 이미 올린 폴더를 고른 뒤 누르세요. 표시한 폴더는 이 프로그램이 올리지 않습니다">직접 올림으로 표시</button>
+            <span class="muted hidden" id="manualHint">로그인하면 '직접 올림' 표시가 보입니다</span>
             <span class="spacer"></span>
             <button class="link" id="btnSkipped"></button>
           </div>
@@ -380,6 +383,17 @@ https://www.googleapis.com/auth/userinfo.email</pre><button class="small" data-c
     <h3 id="skTitle">올리지 않는 파일</h3>
     <div class="scroll-list" id="skBody"></div>
     <div class="dialog-actions"><button class="primary" id="skClose">닫기</button></div>
+  </div>
+</div>
+
+<div class="modal hidden" id="markModal" role="dialog" aria-modal="true" aria-labelledby="mkTitle">
+  <div class="dialog">
+    <h3 id="mkTitle">직접 올림으로 표시할까요?</h3>
+    <div id="mkBody"></div>
+    <div class="dialog-actions">
+      <button id="mkCancel">취소</button>
+      <button class="primary" id="mkOk">표시하기</button>
+    </div>
   </div>
 </div>
 

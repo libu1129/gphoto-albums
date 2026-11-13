@@ -19,6 +19,11 @@ CREATE TABLE IF NOT EXISTS items(
   updated_at REAL NOT NULL,
   PRIMARY KEY(account, root, folder, path, size, mtime_ns));
 CREATE INDEX IF NOT EXISTS items_album ON items(album_id, status);
+-- 구글 포토에 손으로 이미 올린 폴더(사용자가 '직접 올림'으로 표시). 구글 계정마다, 최상위 폴더(normcase)마다.
+-- 열쇠 파일(client)과는 무관하다. 손으로 올린 것은 계정에 속하기 때문이다.
+CREATE TABLE IF NOT EXISTS manual(
+  google_id TEXT NOT NULL, root TEXT NOT NULL, folder TEXT NOT NULL, created_at REAL NOT NULL,
+  PRIMARY KEY(google_id, root, folder));
 """
 
 _UPSERT_KEY = "ON CONFLICT(account, root, folder, path, size, mtime_ns) DO UPDATE SET "
@@ -144,6 +149,20 @@ class Store:
             out.setdefault(folder, {}).setdefault("albums", []).append(
                 dict(part=part, title=title, url=url, missing=bool(missing)))
         return out
+
+    # ── 손으로 올린 폴더 표시 ──
+    def manual_folders(self, google_id, root):
+        return {r[0] for r in self._rows("SELECT folder FROM manual WHERE google_id=? AND root=?",
+                                         (google_id, root))}
+
+    def set_manual(self, google_id, root, folders, on):
+        if on:
+            now = time.time()
+            self._write_many("INSERT OR IGNORE INTO manual(google_id, root, folder, created_at) "
+                             "VALUES(?,?,?,?)", [(google_id, root, f, now) for f in folders])
+        else:
+            self._write_many("DELETE FROM manual WHERE google_id=? AND root=? AND folder=?",
+                             [(google_id, root, f) for f in folders])
 
     def failed_examples(self, account, root, limit=50):
         return self._rows("SELECT path, error FROM items WHERE account=? AND root=? AND "
