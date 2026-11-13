@@ -8,9 +8,12 @@
 from __future__ import annotations
 
 import os
+import socket
 import time
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.connection import HTTPConnection
 
 from .scan import RESUMABLE_MIN, long_path, sniff
 
@@ -24,6 +27,28 @@ except ImportError:  # pragma: no cover
         pass
 
 API_BASE = "https://photoslibrary.googleapis.com/v1"
+
+# 보내기 버퍼. 윈도우 기본(64KB)으로는 구글까지 왕복 57ms에서 연결 하나가 초당 약 1MB에 묶였다.
+# 2026-11-13 같은 16MB를 업로드 주소로 보내 잰 값: 기본 0.99MB/s, 8MB 버퍼 9.0MB/s.
+SEND_BUFFER = 8 * 1024 * 1024
+
+
+class _BigSendBufferAdapter(HTTPAdapter):
+    """보내기 버퍼를 키운 연결. 기본 소켓 옵션(TCP_NODELAY)은 그대로 두고 SO_SNDBUF만 더한다."""
+
+    def init_poolmanager(self, *args, **kwargs):
+        kwargs["socket_options"] = list(HTTPConnection.default_socket_options) + [
+            (socket.SOL_SOCKET, socket.SO_SNDBUF, SEND_BUFFER)]
+        return super().init_poolmanager(*args, **kwargs)
+
+
+def tune_session(session):
+    """구글로 보내는 세션에 큰 보내기 버퍼를 단다(업로드 속도). 작은 요청(앨범 만들기 등)엔 영향이 없다.
+    프록시를 거치는 연결(proxy_manager_for)에는 걸리지 않는다. 이 PC는 프록시를 쓰지 않는다(2026-11-13 확인)."""
+    adapter = _BigSendBufferAdapter()
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)  # 시험의 가짜 서버(http://127.0.0.1)도 같은 길로 지나게
+    return session
 
 _MIME = {
     ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".jpe": "image/jpeg", ".jfif": "image/jpeg",
@@ -151,7 +176,7 @@ class PhotosClient:
     def __init__(self, session, base=API_BASE, *, stop=None, on_wait=None, on_request=None,
                  log=None, sleep=time.sleep, clock=time.time, resumable_min=RESUMABLE_MIN,
                  rate_wait=30, rate_cap=600, daily_wait=3600, net_wait=5, net_cap=300, max_5xx=6):
-        self.s = session
+        self.s = tune_session(session)
         self.base = base.rstrip("/")
         self.stop = stop
         self._on_wait = on_wait or (lambda reason, until: None)

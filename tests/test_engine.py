@@ -78,6 +78,32 @@ class EngineTest(unittest.TestCase):
     def album_items(self):
         return {a["title"]: sorted(a["items"]) for a in self.fake.albums.values()}
 
+    def test_session_gets_big_send_buffer(self):
+        """구글로 보내는 연결은 보내기 버퍼를 키운다(윈도우 기본 64KB로는 초당 약 1MB에 묶임). TCP_NODELAY는 그대로."""
+        import socket
+        from gphoto.photos_api import SEND_BUFFER
+        s = requests.Session()
+        PhotosClient(s, self.fake.base, stop=threading.Event())
+        for url in ("https://photoslibrary.googleapis.com/v1/uploads", self.fake.base):
+            opts = s.get_adapter(url).poolmanager.connection_pool_kw["socket_options"]
+            self.assertIn((socket.SOL_SOCKET, socket.SO_SNDBUF, SEND_BUFFER), opts)
+            self.assertIn((socket.IPPROTO_TCP, socket.TCP_NODELAY, 1), opts)
+        # 실제 앱이 쓰는 로그인 세션(google-auth AuthorizedSession)에도 걸리는지
+        from google.auth.transport.requests import AuthorizedSession
+        from google.oauth2.credentials import Credentials
+        a = AuthorizedSession(Credentials(token="시험"))
+        PhotosClient(a, stop=threading.Event())
+        opts = a.get_adapter("https://photoslibrary.googleapis.com/v1/uploads").poolmanager.connection_pool_kw["socket_options"]
+        self.assertIn((socket.SOL_SOCKET, socket.SO_SNDBUF, SEND_BUFFER), opts)
+        # 실제로 연결한 소켓에 걸리는지(가짜 서버에 연결 하나를 맺어 본다)
+        pool = s.get_adapter(self.fake.base).poolmanager.connection_from_url(self.fake.base)
+        conn = pool._new_conn()
+        conn.connect()
+        try:
+            self.assertGreaterEqual(conn.sock.getsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF), SEND_BUFFER)
+        finally:
+            conn.close()
+
     def test_basic_upload(self):
         p, plan = self.run_engine()
         self.assertEqual(p.phase, "done", p.message)
